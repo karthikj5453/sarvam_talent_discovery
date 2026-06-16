@@ -1,0 +1,37 @@
+import React from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import SidebarLayout from './components/SidebarLayout';
+import Login from './pages/Login';
+import Overview from './pages/Overview';
+import Jobs from './pages/Jobs';
+import Candidates from './pages/Candidates';
+import CandidateDetails from './pages/CandidateDetails';
+
+// Simple Route Guard to protect HR pages
+function ProtectedRoute({ children }) {
+  const token = localStorage.getItem('hr_token');
+  if (!token) {
+    return <Navigate to="/login" replace />;
+  }
+  return <SidebarLayout>{children}</SidebarLayout>;
+}
+
+export default function App() {
+  return (
+    <Router>
+      <Routes>
+        {/* Public Routes */}
+        <Route path="/login" element={<Login />} />
+
+        {/* Protected Dashboard Routes */}
+        <Route path="/" element={<ProtectedRoute><Overview /></ProtectedRoute>} />
+        <Route path="/jobs" element={<ProtectedRoute><Jobs /></ProtectedRoute>} />
+        <Route path="/candidates" element={<ProtectedRoute><Candidates /></ProtectedRoute>} />
+        <Route path="/candidates/:candidateId" element={<ProtectedRoute><CandidateDetails /></ProtectedRoute>} />
+
+        {/* Fallback */}
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </Router>
+  );
+}
