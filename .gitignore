@@ -1,0 +1,65 @@
+# ─── Python ───────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.Python
+
+# ─── Virtual environments ────────────────────────────────────
+venv/
+.venv/
+env/
+ENV/
+backend/venv/
+backend/.venv/
+
+# ─── Environment / secrets ───────────────────────────────────
+.env
+.env.*
+!.env.example
+infra/.env
+
+# ─── Database ────────────────────────────────────────────────
+*.db
+*.sqlite3
+
+# ─── Logs ────────────────────────────────────────────────────
+*.log
+logs/
+
+# ─── IDE / OS ────────────────────────────────────────────────
+.vscode/
+.idea/
+*.DS_Store
+Thumbs.db
+desktop.ini
+
+# ─── Node / Frontend ─────────────────────────────────────────
+node_modules/
+frontend/node_modules/
+dashboard/node_modules/
+frontend/dist/
+dashboard/dist/
+frontend/.vite/
+dashboard/.vite/
+
+# ─── Testing ─────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ─── Jupyter ─────────────────────────────────────────────────
+ai/notebooks/.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# ─── Docker volumes ──────────────────────────────────────────
+postgres_data/
+
+# ─── Build artifacts ─────────────────────────────────────────
+*.pyc
+*.pyo
