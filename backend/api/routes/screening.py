@@ -81,6 +81,7 @@ async def upload_resume(
         raise HTTPException(status_code=404, detail="Candidate not found")
 
     final_url = resume_url
+    file_bytes = None
 
     if file and not resume_url:
         try:
@@ -93,8 +94,20 @@ async def upload_resume(
 
     if final_url:
         candidate.resume_url = final_url
-        db.commit()
 
+    # ── Extract text from PDF using PyMuPDF ───────────────────
+    if file_bytes:
+        try:
+            import fitz  # PyMuPDF
+            with fitz.open(stream=file_bytes, filetype="pdf") as doc:
+                resume_text = "\n".join(page.get_text() for page in doc).strip()
+            if resume_text:
+                candidate.resume_text = resume_text[:10000]  # cap at 10k chars
+                logger.info(f"[Screening] Extracted {len(resume_text)} chars from resume PDF")
+        except Exception as e:
+            logger.warning(f"[Screening] PDF text extraction failed: {e}")
+
+    db.commit()
     return {"status": "ok", "resume_url": final_url}
 
 

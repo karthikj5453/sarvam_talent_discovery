@@ -1,4 +1,4 @@
-const BASE_URL = 'http://localhost:8000';
+const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 async function request(endpoint, options = {}) {
   const token = localStorage.getItem('hr_token');
@@ -32,11 +32,13 @@ async function request(endpoint, options = {}) {
     throw new Error(errorDetail);
   }
 
+  // Some endpoints return 204 No Content
+  if (response.status === 204) return null;
   return response.json();
 }
 
 export const api = {
-  // Login
+  // ─── Auth ──────────────────────────────────────────────────
   async login(email, password) {
     const formData = new URLSearchParams();
     formData.append('username', email); // OAuth2 password flow uses 'username'
@@ -56,74 +58,126 @@ export const api = {
     return data;
   },
 
-  // Logout
   logout() {
     localStorage.removeItem('hr_token');
     window.location.href = '/login';
   },
 
-  // Get current HR user profile
   async getMe() {
     return request('/auth/me');
   },
 
-  // Register a new HR account (optional utility)
   async register({ email, password, full_name, role = 'hr' }) {
     return request('/auth/register', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password, full_name, role }),
     });
   },
 
-  // Job Operations
-  async getJobs() {
-    return request('/jobs/');
+  // ─── Jobs ──────────────────────────────────────────────────
+  async getJobs(activeOnly = true) {
+    return request(`/jobs/?active_only=${activeOnly}`);
   },
 
   async createJob(jobData) {
     return request('/jobs/', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(jobData),
     });
   },
 
-  // Candidate Operations
-  async getCandidates(jobId = null) {
-    const endpoint = jobId ? `/candidates/?job_id=${jobId}` : '/candidates/';
-    return request(endpoint);
-  },
-
-  async updateCandidateStatus(candidateId, status) {
-    return request(`/candidates/${candidateId}/status?status=${status}`, {
+  async updateJob(jobId, jobData) {
+    return request(`/jobs/${jobId}`, {
       method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(jobData),
     });
   },
 
-  // Competency Evaluations
-  async getEvaluations() {
-    return request('/evaluations/');
+  async deleteJob(jobId) {
+    return request(`/jobs/${jobId}`, { method: 'DELETE' });
+  },
+
+  // ─── Candidates ────────────────────────────────────────────
+  async getCandidates(jobId = null, status = null) {
+    const params = new URLSearchParams();
+    if (jobId) params.append('job_id', jobId);
+    if (status) params.append('status', status);
+    const query = params.toString() ? `?${params.toString()}` : '';
+    return request(`/candidates/${query}`);
+  },
+
+  async getCandidate(candidateId) {
+    return request(`/candidates/${candidateId}`);
+  },
+
+  async updateCandidateStatus(candidateId, newStatus) {
+    // Status goes in request body as JSON
+    return request(`/candidates/${candidateId}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: newStatus }),
+    });
+  },
+
+  // ─── Evaluations ───────────────────────────────────────────
+  async getEvaluations(jobId = null, minScore = null) {
+    const params = new URLSearchParams();
+    if (jobId) params.append('job_id', jobId);
+    if (minScore !== null) params.append('min_score', minScore);
+    const query = params.toString() ? `?${params.toString()}` : '';
+    return request(`/evaluations/${query}`);
   },
 
   async getCandidateEvaluation(candidateId) {
-    return request(`/evaluations/candidate/${candidateId}`);
+    // Backend route is GET /evaluations/{candidate_id}
+    return request(`/evaluations/${candidateId}`);
   },
 
-  // Dashboard Aggregates & Analytics
-  async getStats() {
-    return request('/dashboard/stats');
+  // ─── Dashboard Pipeline ────────────────────────────────────
+  async getPipeline(jobId = null) {
+    const query = jobId ? `?job_id=${jobId}` : '';
+    return request(`/dashboard/pipeline${query}`);
   },
 
-  async getLanguages() {
-    return request('/dashboard/languages');
+  async getDashboardCandidates(jobId = null, status = null) {
+    const params = new URLSearchParams();
+    if (jobId) params.append('job_id', jobId);
+    if (status) params.append('status', status);
+    const query = params.toString() ? `?${params.toString()}` : '';
+    return request(`/dashboard/candidates${query}`);
   },
 
+  async getTopCandidates(jobId, limit = 10) {
+    return request(`/dashboard/jobs/${jobId}/top-candidates?limit=${limit}`);
+  },
+
+  // ─── Analytics ─────────────────────────────────────────────
   async getFunnel() {
-    return request('/dashboard/funnel');
+    return request('/analytics/funnel');
+  },
+
+  async getDropOff() {
+    return request('/analytics/drop-off');
+  },
+
+  async trackEvent(eventType, candidateId = null, jobId = null, metadata = {}) {
+    return request('/analytics/event', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        event_type: eventType,
+        candidate_id: candidateId,
+        job_id: jobId,
+        event_metadata: metadata,
+      }),
+    });
+  },
+
+  // ─── Screening Session (read-only for HR) ─────────────────
+  async getScreeningSession(sessionId) {
+    return request(`/screening/${sessionId}`);
   },
 };

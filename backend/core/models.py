@@ -40,10 +40,12 @@ class Candidate(Base):
     phone = Column(String(20))
     job_id = Column(UUID(as_uuid=True), ForeignKey("jobs.id"))
     resume_url = Column(Text)
+    resume_text = Column(Text)          # extracted plain-text from PDF (via PyMuPDF)
     detected_language = Column(String(50))
     status = Column(String(50), default="applied")
     # applied → screened → shortlisted → interviewing → offered → rejected
     created_at = Column(TIMESTAMP, server_default=func.now())
+
 
 
 class ScreeningSession(Base):

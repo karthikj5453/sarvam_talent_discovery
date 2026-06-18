@@ -1,25 +1,28 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../services/api';
-import { Users, Briefcase, Award, Percent, ChevronRight, HelpCircle } from 'lucide-react';
+import { Users, Briefcase, Award, Percent, HelpCircle } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 export default function Overview() {
-  const [stats, setStats] = useState({ total_jobs: 0, total_candidates: 0, avg_score: 0, shortlisted_count: 0 });
-  const [languages, setLanguages] = useState({});
-  const [funnel, setFunnel] = useState({});
+  const [pipeline, setPipeline] = useState({ total_candidates: 0, stages: [] });
+  const [funnel, setFunnel] = useState([]);
+  const [jobs, setJobs] = useState([]);
+  const [evaluations, setEvaluations] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function loadData() {
       try {
-        const [statsData, langData, funnelData] = await Promise.all([
-          api.getStats(),
-          api.getLanguages(),
-          api.getFunnel()
+        const [pipelineData, funnelData, jobList, evalList] = await Promise.all([
+          api.getPipeline(),
+          api.getFunnel(),
+          api.getJobs(),
+          api.getEvaluations(),
         ]);
-        setStats(statsData);
-        setLanguages(langData);
+        setPipeline(pipelineData);
         setFunnel(funnelData);
+        setJobs(jobList);
+        setEvaluations(evalList);
       } catch (err) {
         console.error('Failed to load dashboard overview data:', err);
       } finally {
@@ -33,10 +36,28 @@ export default function Overview() {
     return <p style={{ color: 'var(--text-secondary)' }}>Loading overview metrics...</p>;
   }
 
-  // Calculate shortlist rate
-  const shortlistRate = stats.total_candidates > 0 
-    ? Math.round((stats.shortlisted_count / stats.total_candidates) * 100) 
+  const totalCandidates = pipeline.total_candidates || 0;
+  const activeJobs = jobs.length;
+
+  // Average score from evaluations
+  const scoredEvals = evaluations.filter(e => e.total_score != null);
+  const avgScore = scoredEvals.length > 0
+    ? scoredEvals.reduce((acc, e) => acc + e.total_score, 0) / scoredEvals.length
     : 0;
+
+  // Shortlisted count from pipeline stages
+  const shortlistedStage = pipeline.stages?.find(s => s.status === 'shortlisted');
+  const shortlistedCount = shortlistedStage?.count || 0;
+  const shortlistRate = totalCandidates > 0
+    ? Math.round((shortlistedCount / totalCandidates) * 100)
+    : 0;
+
+  // Funnel data: backend returns [{stage, count}]
+  const funnelItems = Array.isArray(funnel) ? funnel : [];
+  const maxFunnelCount = Math.max(...funnelItems.map(f => f.count), 1);
+
+  // Language distribution: derive from pipeline stages (no dedicated endpoint)
+  const stageData = pipeline.stages || [];
 
   return (
     <div>
@@ -49,7 +70,7 @@ export default function Overview() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <div>
               <p className="card-title">Active Job Roles</p>
-              <h2 className="card-value">{stats.total_jobs}</h2>
+              <h2 className="card-value">{activeJobs}</h2>
             </div>
             <div style={{ background: 'var(--primary-glow)', padding: '0.75rem', borderRadius: '0.5rem', color: 'var(--primary-light)' }}>
               <Briefcase size={22} />
@@ -61,7 +82,7 @@ export default function Overview() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <div>
               <p className="card-title">Total Candidates</p>
-              <h2 className="card-value">{stats.total_candidates}</h2>
+              <h2 className="card-value">{totalCandidates}</h2>
             </div>
             <div style={{ background: 'rgba(59, 130, 246, 0.12)', padding: '0.75rem', borderRadius: '0.5rem', color: '#60a5fa' }}>
               <Users size={22} />
@@ -73,7 +94,7 @@ export default function Overview() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <div>
               <p className="card-title">Avg Competency Score</p>
-              <h2 className="card-value">{stats.avg_score ? stats.avg_score.toFixed(1) : '0.0'}<span style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>/10</span></h2>
+              <h2 className="card-value">{avgScore.toFixed(1)}<span style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>/10</span></h2>
             </div>
             <div style={{ background: 'rgba(16, 185, 129, 0.12)', padding: '0.75rem', borderRadius: '0.5rem', color: '#34d399' }}>
               <Award size={22} />
@@ -95,14 +116,13 @@ export default function Overview() {
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr', gap: '2rem', marginTop: '2rem' }}>
-        
-        {/* Drop-off Funnel Chart */}
+
+        {/* Hiring Pipeline Funnel */}
         <div className="dashboard-card">
           <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '1.5rem' }}>Hiring Pipeline Funnel</h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-            {Object.entries(funnel).map(([stage, count], index, arr) => {
-              const maxVal = Math.max(...arr.map(x => x[1]), 1);
-              const percentage = Math.round((count / maxVal) * 100);
+            {funnelItems.map(({ stage, count }) => {
+              const percentage = Math.round((count / maxFunnelCount) * 100);
               return (
                 <div key={stage} style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
@@ -115,33 +135,37 @@ export default function Overview() {
                 </div>
               );
             })}
-            {Object.keys(funnel).length === 0 && (
-              <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>No pipeline analytics events recorded yet.</p>
+            {funnelItems.length === 0 && (
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>No candidates in pipeline yet.</p>
             )}
           </div>
         </div>
 
-        {/* Languages Distribution */}
+        {/* Pipeline Stage Distribution */}
         <div className="dashboard-card">
-          <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '1.5rem' }}>Multilingual Distribution</h3>
+          <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '1.5rem' }}>Pipeline Stage Breakdown</h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            {Object.entries(languages).map(([lang, count], index, arr) => {
-              const total = arr.reduce((acc, curr) => acc + curr[1], 0);
-              const pct = Math.round((count / total) * 100);
+            {stageData.filter(s => s.count > 0).map(({ status, count }) => {
+              const pct = totalCandidates > 0 ? Math.round((count / totalCandidates) * 100) : 0;
+              const color = status === 'shortlisted' ? '#10b981'
+                : status === 'screened' ? '#818cf8'
+                : status === 'offered' ? '#f59e0b'
+                : status === 'rejected' ? '#ef4444'
+                : 'var(--primary-light)';
               return (
-                <div key={lang} style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                <div key={status} style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
-                    <span style={{ fontWeight: 500, color: 'var(--text-primary)' }}>{lang || 'Unknown'}</span>
+                    <span style={{ fontWeight: 500, color: 'var(--text-primary)', textTransform: 'capitalize' }}>{status}</span>
                     <span style={{ color: 'var(--text-secondary)' }}>{count} ({pct}%)</span>
                   </div>
                   <div style={{ height: '8px', background: 'rgba(255,255,255,0.03)', borderRadius: '4px', overflow: 'hidden' }}>
-                    <div style={{ height: '100%', width: `${pct}%`, background: '#10b981', borderRadius: '4px', transition: 'width 0.6s' }}></div>
+                    <div style={{ height: '100%', width: `${pct}%`, background: color, borderRadius: '4px', transition: 'width 0.6s' }}></div>
                   </div>
                 </div>
               );
             })}
-            {Object.keys(languages).length === 0 && (
-              <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>No screening languages detected yet.</p>
+            {stageData.every(s => s.count === 0) && (
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>No candidates yet.</p>
             )}
           </div>
         </div>

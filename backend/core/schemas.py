@@ -87,8 +87,8 @@ class ScreeningSessionResponse(BaseModel):
     candidate_id: UUID
     intro_transcript: Optional[str] = None
     intro_language: Optional[str] = None
-    followup_questions: Optional[List[FollowUpQuestion]] = []
-    followup_answers: Optional[List[FollowUpAnswer]] = []
+    followup_questions: Optional[List[Any]] = []   # list of strings or dicts from DB
+    followup_answers: Optional[List[Any]] = []     # list of {transcript, audio_url} dicts
     total_duration_seconds: Optional[int] = None
     completed_at: Optional[datetime] = None
     created_at: datetime

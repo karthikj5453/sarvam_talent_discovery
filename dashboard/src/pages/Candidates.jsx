@@ -4,8 +4,7 @@ import { Search, Filter, User, Calendar, Award, Globe, ArrowRight } from 'lucide
 import { Link } from 'react-router-dom';
 
 export default function Candidates() {
-  const [candidates, setCandidates] = useState([]);
-  const [evaluations, setEvaluations] = useState([]);
+  const [candidatesWithScores, setCandidatesWithScores] = useState([]);
   const [jobs, setJobs] = useState([]);
   const [selectedJobId, setSelectedJobId] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
@@ -13,13 +12,11 @@ export default function Candidates() {
 
   const loadData = async () => {
     try {
-      const [candList, evalList, jobList] = await Promise.all([
-        api.getCandidates(),
-        api.getEvaluations(),
+      const [candList, jobList] = await Promise.all([
+        api.getDashboardCandidates(),   // returns [{candidate, score}]
         api.getJobs()
       ]);
-      setCandidates(candList);
-      setEvaluations(evalList);
+      setCandidatesWithScores(candList);
       setJobs(jobList);
     } catch (err) {
       console.error('Failed to load candidate metrics:', err);
@@ -37,17 +34,12 @@ export default function Candidates() {
     return job ? job.title : 'Software Engineer';
   };
 
-  // Find candidate overall score
-  const getOverallScore = (candidateId) => {
-    const evaluation = evaluations.find(ev => ev.candidate_id === candidateId);
-    return evaluation ? evaluation.total_score.toFixed(1) : '-';
-  };
-
   // Filter candidates
-  const filteredCandidates = candidates.filter((cand) => {
-    const matchesJob = selectedJobId ? cand.job_id === selectedJobId : true;
-    const matchesSearch = searchTerm 
-      ? cand.name.toLowerCase().includes(searchTerm.toLowerCase()) || cand.email.toLowerCase().includes(searchTerm.toLowerCase())
+  const filtered = candidatesWithScores.filter(({ candidate }) => {
+    const matchesJob = selectedJobId ? candidate.job_id === selectedJobId : true;
+    const matchesSearch = searchTerm
+      ? (candidate.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        candidate.email.toLowerCase().includes(searchTerm.toLowerCase())
       : true;
     return matchesJob && matchesSearch;
   });
@@ -107,8 +99,8 @@ export default function Candidates() {
             </tr>
           </thead>
           <tbody>
-            {filteredCandidates.map((cand) => {
-              const score = getOverallScore(cand.id);
+            {filtered.map(({ candidate: cand, score }) => {
+              const totalScore = score?.total_score;
               return (
                 <tr key={cand.id}>
                   <td style={{ fontWeight: 600, color: '#fff' }}>
@@ -119,9 +111,9 @@ export default function Candidates() {
                   </td>
                   <td>{getJobTitle(cand.job_id)}</td>
                   <td style={{ fontWeight: 700 }}>
-                    {score !== '-' ? (
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', color: parseFloat(score) >= 6.0 ? '#34d399' : '#a5b4fc' }}>
-                        <Award size={14} /> {score}
+                    {totalScore != null ? (
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', color: totalScore >= 6.0 ? '#34d399' : '#a5b4fc' }}>
+                        <Award size={14} /> {totalScore.toFixed(1)}
                       </span>
                     ) : (
                       <span style={{ color: 'var(--text-muted)' }}>Unscreened</span>
@@ -156,7 +148,7 @@ export default function Candidates() {
                 </tr>
               );
             })}
-            {filteredCandidates.length === 0 && (
+            {filtered.length === 0 && (
               <tr>
                 <td colSpan="7" style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
                   No candidates matching the filters.

@@ -150,8 +150,12 @@ async def run_evaluation(session_id: uuid.UUID, db: Session) -> Optional[Compete
 # ─── INTERNAL HELPERS ─────────────────────────────────────────
 
 def _collect_transcripts(session: ScreeningSession, candidate: Candidate) -> dict:
-    """Collect all available text from the session."""
+    """Collect all available text from the session, including resume if parsed."""
     transcripts = {}
+
+    # Include resume text as context if available
+    if getattr(candidate, "resume_text", None):
+        transcripts["resume"] = candidate.resume_text
 
     if session.intro_transcript:
         transcripts["intro"] = session.intro_transcript

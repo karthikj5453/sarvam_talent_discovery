@@ -30,5 +30,49 @@ services:
       timeout: 5s
       retries: 5
 
+  # ─── Backend API (production mode) ───────────────────────────
+  # Usage: docker compose --profile prod up
+  # Dev mode: run `uvicorn main:app --reload` directly instead.
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sarvam_backend
+    profiles: ["prod"]
+    ports:
+      - "8000:8000"
+    env_file:
+      - backend/.env
+    environment:
+      DATABASE_URL: postgresql://postgres:password@postgres:5432/sarvam_talent
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ─── Celery Worker (production mode) ─────────────────────────
+  celery-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sarvam_celery
+    profiles: ["prod"]
+    working_dir: /app/backend
+    command: ["celery", "-A", "services.background.tasks", "worker", "--loglevel=info", "--concurrency=2"]
+    env_file:
+      - backend/.env
+    environment:
+      DATABASE_URL: postgresql://postgres:password@postgres:5432/sarvam_talent
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   postgres_data:

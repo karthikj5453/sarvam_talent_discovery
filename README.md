@@ -368,14 +368,18 @@ total = Σ (score_i × weight_i)   where Σ weights = 1.0
 - [x] **Phase 1** — Backend API (all 34 endpoints with real DB logic)
 - [x] **Phase 1** — Sarvam AI client (STT, TTS, Translate)
 - [x] **Phase 1** — Auth, Docker Compose, .gitignore
-- [ ] **Phase 2a** — Wire Sarvam STT into screening routes
-- [ ] **Phase 2b** — S3 storage service for audio + resumes
-- [ ] **Phase 2c** — LLM evaluation pipeline (auto-scoring)
-- [ ] **Phase 2d** — Celery background task worker
-- [ ] **Phase 3** — Candidate portal UI (React + Vite)
-- [ ] **Phase 3** — HR dashboard UI (React + Vite)
-- [ ] **Phase 4** — LLM prompt engineering + evals
-- [ ] **Phase 5** — Production Docker + CI/CD
+- [x] **Phase 2a** — Sarvam STT wired into screening routes (auto-transcribe on upload)
+- [x] **Phase 2b** — S3 + local-fallback storage service for audio + resumes
+- [x] **Phase 2c** — LLM evaluation pipeline (Gemini scoring + heuristic fallback)
+- [x] **Phase 2d** — Celery background task worker (ASYNC_EVAL=true to enable)
+- [x] **Phase 2e** — Resume PDF text extraction (PyMuPDF → feeds AI evaluator)
+- [x] **Phase 3** — Candidate portal UI (React + Vite, port 5173)
+- [x] **Phase 3** — HR dashboard UI (React + Vite, port 5174)
+- [x] **Phase 4** — LLM prompt engineering (competency scorer + follow-up Q generator)
+- [x] **Phase 4** — GitHub Actions CI/CD (pytest + frontend build checks)
+- [x] **Phase 4** — Production Docker (multi-stage Dockerfile + docker-compose prod profile)
+- [ ] **Phase 5** — Production deployment (cloud hosting, domain, SSL)
+- [ ] **Phase 5** — HR notification emails (SendGrid/SMTP on shortlisting)
 
 ---
 

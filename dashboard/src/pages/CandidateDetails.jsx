@@ -15,30 +15,22 @@ export default function CandidateDetails() {
 
   const loadData = async () => {
     try {
-      // 1. Fetch Candidate
-      const candidates = await api.getCandidates();
-      const cand = candidates.find(c => c.id === candidateId);
-      if (!cand) {
-        setError('Candidate not found.');
-        return;
-      }
-      setCandidate(cand);
+      // getCandidate returns {candidate, score} (CandidateWithScore)
+      const candWithScore = await api.getCandidate(candidateId);
+      setCandidate(candWithScore.candidate);
+      setEvaluation(candWithScore.score || null);
 
-      // 2. Fetch Evaluation
-      try {
-        const evalData = await api.getCandidateEvaluation(candidateId);
-        setEvaluation(evalData);
-        
-        // 3. Fetch Screening Session
-        if (evalData.session_id) {
-          const sessData = await api.getScreeningSession(evalData.session_id);
+      // Try to load the screening session if we have an evaluation
+      if (candWithScore.score?.session_id) {
+        try {
+          const sessData = await api.getScreeningSession(candWithScore.score.session_id);
           setSession(sessData);
+        } catch (_) {
+          // Session may not exist yet
         }
-      } catch (_) {
-        // Candidate might not have completed screening yet
       }
     } catch (err) {
-      setError('Failed to load candidate metrics detail.');
+      setError('Failed to load candidate profile.');
     } finally {
       setLoading(false);
     }
@@ -219,10 +211,12 @@ export default function CandidateDetails() {
                 
                 {session.followup_questions?.map((q, idx) => {
                   const answer = session.followup_answers?.[idx] || {};
+                  // q may be a string (new format) or an object with .question (old format)
+                  const questionText = typeof q === 'string' ? q : q?.question || `Question ${idx + 1}`;
                   return (
                     <div key={idx} style={{ marginBottom: '1.5rem', borderLeft: '3px solid var(--border-muted)', paddingLeft: '1rem' }}>
                       <p style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>
-                        Question {idx + 1}: {q.question}
+                        Question {idx + 1}: {questionText}
                       </p>
                       <p style={{ fontSize: '0.9rem', color: 'var(--text-primary)', background: 'rgba(255,255,255,0.01)', padding: '0.75rem', borderRadius: '0.5rem', lineHeight: 1.5 }}>
                         {answer.transcript || 'Waiting for candidate audio answer...'}
