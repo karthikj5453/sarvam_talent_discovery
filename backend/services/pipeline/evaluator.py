@@ -6,14 +6,14 @@ Flow:
 2. Load job's competency weights
 3. Call Sarvam STT-Translate to get English translation of all answers
 4. Build scoring prompt with job context + all transcripts
-5. Call Sarvam API (or any LLM) to score 6 competency dimensions
-6. Generate HR summary text
+5. Call Gemini LLM to score 6 competency dimensions
+6. Generate HR summary text (from LLM or template)
 7. Convert summary to audio via Sarvam TTS
-8. Upload summary audio to S3
+8. Upload summary audio to S3 / local storage
 9. Save CompetencyScore row to DB
 
-Currently uses Sarvam's translate API + a simple scoring heuristic.
-In production: swap _call_llm_scorer() for Gemini/GPT-4/Sarvam-105B.
+LLM: Gemini 2.0 Flash (configurable via GEMINI_MODEL in .env)
+Fallback: keyword heuristic scorer if Gemini unavailable.
 """
 import json
 import re
@@ -27,6 +27,11 @@ from sqlalchemy.orm import Session
 from core.models import Candidate, Job, ScreeningSession, CompetencyScore
 from services.sarvam.sarvam_client import translate_text, text_to_speech, SarvamError
 from services.storage.s3_client import upload_audio, key_to_url
+from services.llm.gemini_client import (
+    score_competencies_with_gemini,
+    GeminiError,
+)
+from services.llm.competency_scorer import build_scoring_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -82,26 +87,28 @@ async def run_evaluation(session_id: uuid.UUID, db: Session) -> Optional[Compete
     # ── 3. Translate to English if needed ────────────────────
     english_text = await _translate_if_needed(transcripts, candidate.detected_language)
 
-    # ── 4. Score competencies ────────────────────────────────
+    # ── 4. Score competencies with Gemini ──────────────────
     job_title = job.title if job else "Software Engineer"
     job_skills = job.required_skills if job else []
-    scores, justifications, flags = await _score_competencies(
+    scores, justifications, flags, llm_hr_summary = await _score_competencies(
         english_text, job_title, job_skills, weights
     )
 
-    # ── 5. Compute weighted total ─────────────────────────────
+    # ── 5. Compute weighted total ──────────────────────────────
     total_score = sum(
         scores.get(k, 0) * weights.get(k, 0) for k in COMPETENCY_KEYS
     )
 
-    # ── 6. Generate HR summary text ──────────────────────────
-    hr_summary = _build_hr_summary(candidate, job_title, scores, total_score, flags, justifications)
+    # ── 6. Build HR summary (prefer LLM-generated, fall back to template) ─
+    hr_summary = llm_hr_summary or _build_hr_summary(
+        candidate, job_title, scores, total_score, flags, justifications
+    )
 
-    # ── 7. Convert summary to audio via Sarvam TTS ───────────
+    # ── 7. Convert summary to audio via Sarvam TTS ───────────────
     hr_summary_audio_url = None
     try:
         audio_bytes = await text_to_speech(
-            text=hr_summary,
+            text=hr_summary[:400],  # TTS has ~500 char limit per call
             target_language_code="en-IN",
         )
         s3_key = upload_audio(audio_bytes, str(candidate.id), label="hr_summary")
@@ -109,9 +116,9 @@ async def run_evaluation(session_id: uuid.UUID, db: Session) -> Optional[Compete
     except SarvamError as e:
         logger.warning(f"[Evaluator] TTS failed: {e} — continuing without audio")
     except Exception as e:
-        logger.warning(f"[Evaluator] S3 upload failed: {e} — continuing without audio")
+        logger.warning(f"[Evaluator] Audio upload failed: {e} — continuing without audio")
 
-    # ── 8. Save to DB ─────────────────────────────────────────
+    # ── 8. Save to DB ────────────────────────────────────────
     score_row = CompetencyScore(
         candidate_id=candidate.id,
         session_id=session.id,
@@ -126,7 +133,7 @@ async def run_evaluation(session_id: uuid.UUID, db: Session) -> Optional[Compete
         flags=flags,
         hr_summary=hr_summary,
         hr_summary_audio_url=hr_summary_audio_url,
-        raw_105b_response={"english_transcript": english_text},
+        raw_105b_response={"english_transcript": english_text, "llm_scored": True},
     )
     db.add(score_row)
 
@@ -186,19 +193,56 @@ async def _score_competencies(
     job_title: str,
     required_skills: list,
     weights: dict,
-) -> tuple[dict, dict, list]:
+) -> tuple[dict, dict, list, Optional[str]]:
     """
     Score the candidate across 6 competency dimensions.
 
-    Currently uses a keyword-heuristic scorer.
-    Replace _call_llm_scorer() with a real LLM call for production.
+    Primary: Uses Gemini LLM with the scoring prompt from ai/prompts/competency_scorer.py
+    Fallback: Falls back to keyword heuristic if Gemini is unavailable.
 
     Returns:
         scores:         {"technical_depth": 7.5, ...}
         justifications: {"technical_depth": "Demonstrated...", ...}
         flags:          ["low_shipping_velocity"]
+        hr_summary:     LLM-generated summary string (or None if fallback used)
     """
-    return _heuristic_scorer(english_text, required_skills)
+    system_prompt, user_prompt = build_scoring_prompt(
+        transcript=english_text,
+        job_title=job_title,
+        required_skills=required_skills,
+        weights=weights,
+    )
+
+    try:
+        result = await score_competencies_with_gemini(system_prompt, user_prompt)
+
+        scores_raw = result.get("scores", {})
+        justifications = result.get("justifications", {})
+        flags = result.get("flags", [])
+        hr_summary = result.get("hr_summary")
+
+        # Normalise: ensure all keys exist and values are floats 0-10
+        scores = {}
+        for key in COMPETENCY_KEYS:
+            raw = scores_raw.get(key, 5.0)
+            scores[key] = round(max(0.0, min(10.0, float(raw))), 1)
+
+        # Auto-flag low scores if LLM didn't flag them
+        auto_flags = [k for k, v in scores.items() if v < 4.0]
+        flags = list(set(flags) | set(auto_flags))
+
+        logger.info(f"[Evaluator] Gemini scored successfully. Total input chars: {len(english_text)}")
+        return scores, justifications, flags, hr_summary
+
+    except GeminiError as e:
+        logger.warning(f"[Evaluator] Gemini failed: {e} — falling back to heuristic scorer")
+        scores, justifications, flags = _heuristic_scorer(english_text, required_skills)
+        return scores, justifications, flags, None
+
+    except Exception as e:
+        logger.warning(f"[Evaluator] Unexpected error during scoring: {e} — using heuristic")
+        scores, justifications, flags = _heuristic_scorer(english_text, required_skills)
+        return scores, justifications, flags, None
 
 
 def _heuristic_scorer(text: str, required_skills: list) -> tuple[dict, dict, list]:

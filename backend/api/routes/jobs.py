@@ -102,3 +102,12 @@ def delete_job(
         raise HTTPException(status_code=404, detail="Job not found")
     job.is_active = False
     db.commit()
+
+
+# ─── PUBLIC LIST JOBS ─────────────────────────────────────────
+# No auth required — candidates fetch this to see open positions
+
+@router.get("/public", response_model=List[JobResponse])
+def list_jobs_public(db: Session = Depends(get_db)):
+    """Return all active jobs for the public application form (no HR auth needed)."""
+    return db.query(Job).filter(Job.is_active == True).order_by(Job.created_at.desc()).all()

@@ -1,5 +1,9 @@
+import os
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from config import settings
 from core.database import engine, Base
 
@@ -30,6 +34,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ─── LOCAL STATIC FILES (dev audio/resume storage) ────────────
+# When AWS creds are absent, audio and resume files are stored on disk.
+# This mounts the local_audio directory so the frontend can play them back.
+if settings.use_local_storage():
+    local_audio_path = Path(settings.LOCAL_STORAGE_PATH)
+    local_audio_path.mkdir(parents=True, exist_ok=True)
+    app.mount(
+        "/static/audio",
+        StaticFiles(directory=str(local_audio_path)),
+        name="static_audio",
+    )
+    print(f"[INFO] Local storage mode: serving files from {local_audio_path.resolve()}")
+
 # ─── ROUTES ───────────────────────────────────────────────────
 app.include_router(auth.router,         prefix="/auth",         tags=["Auth"])
 app.include_router(candidates.router,   prefix="/candidates",   tags=["Candidates"])
@@ -43,7 +60,15 @@ app.include_router(analytics.router,    prefix="/analytics",    tags=["Analytics
 # ─── HEALTH CHECK ─────────────────────────────────────────────
 @app.get("/")
 def root():
-    return {"status": "ok", "message": "Sarvam Talent Discovery API is running"}
+    return {
+        "status": "ok",
+        "message": "Sarvam Talent Discovery API is running",
+        "storage_mode": "local" if settings.use_local_storage() else "s3",
+        "llm_configured": bool(
+            settings.GEMINI_API_KEY
+            and settings.GEMINI_API_KEY not in ("your_gemini_api_key_here", "")
+        ),
+    }
 
 @app.get("/health")
 def health():

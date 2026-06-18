@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 import logging
 
 from core.database import get_db
-from core.models import Candidate, ScreeningSession, CompetencyScore
+from core.models import Candidate, Job, ScreeningSession, CompetencyScore
 from core.schemas import (
     ScreeningStartRequest,
     ScreeningSessionResponse,
@@ -15,6 +15,7 @@ from core.schemas import (
 )
 from services.sarvam.sarvam_client import transcribe_and_translate, SarvamError
 from services.storage.s3_client import upload_audio, upload_resume as s3_upload_resume, key_to_url
+from config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -72,8 +73,8 @@ async def upload_resume(
 ):
     """
     Upload a resume. Accepts either:
-      - A direct file upload (PDF) → uploads to S3 automatically
-      - A pre-uploaded S3 URL string (if client uploaded directly to S3)
+      - A direct file upload (PDF) → uploads to S3/local automatically
+      - A pre-uploaded URL string (if client uploaded directly to S3)
     """
     candidate = db.query(Candidate).filter(Candidate.id == candidate_id).first()
     if not candidate:
@@ -87,7 +88,7 @@ async def upload_resume(
             s3_key = s3_upload_resume(file_bytes, str(candidate_id))
             final_url = key_to_url(s3_key)
         except Exception as e:
-            logger.warning(f"[Screening] S3 upload failed: {e} — skipping resume URL")
+            logger.warning(f"[Screening] Resume upload failed: {e} — skipping resume URL")
             final_url = None
 
     if final_url:
@@ -114,8 +115,8 @@ async def upload_intro(
     1. Send raw audio file → Sarvam STT runs automatically
     2. Send pre-computed transcript text → stored directly
 
-    Sarvam STT-Translate auto-detects language and returns
-    both the original transcript and an English translation.
+    After saving the transcript, automatically generates AI follow-up
+    questions using Gemini and stores them in session.followup_questions.
     """
     session = db.query(ScreeningSession).filter(ScreeningSession.id == session_id).first()
     if not session:
@@ -129,13 +130,13 @@ async def upload_intro(
     if file and not transcript:
         audio_bytes = await file.read()
 
-        # Upload to S3 for record-keeping
+        # Upload to storage for record-keeping
         try:
             s3_key = upload_audio(audio_bytes, str(session.candidate_id), label="intro")
             intro_audio_url = key_to_url(s3_key)
             session.intro_audio_url = intro_audio_url
         except Exception as e:
-            logger.warning(f"[Screening] S3 audio upload failed: {e}")
+            logger.warning(f"[Screening] Audio upload failed: {e}")
 
         # Call Sarvam STT + Translate
         try:
@@ -150,7 +151,7 @@ async def upload_intro(
             logger.error(f"[Screening] Sarvam STT failed: {e}")
             raise HTTPException(status_code=502, detail=f"Sarvam STT failed: {e.detail}")
 
-    # ── Save results ──────────────────────────────────────────
+    # ── Save transcript ────────────────────────────────────────
     session.intro_transcript = final_transcript
     session.intro_language = final_language
 
@@ -159,9 +160,40 @@ async def upload_intro(
         if candidate:
             candidate.detected_language = final_language
 
+    # ── Generate follow-up questions via Gemini ───────────────
+    if final_transcript:
+        try:
+            candidate = db.query(Candidate).filter(Candidate.id == session.candidate_id).first()
+            job = db.query(Job).filter(Job.id == candidate.job_id).first() if candidate else None
+            job_title = job.title if job else "Software Engineer"
+            required_skills = job.required_skills if job else []
+
+            from services.llm.gemini_client import generate_followup_questions
+            questions = await generate_followup_questions(
+                intro_transcript=final_transcript,
+                job_title=job_title,
+                required_skills=required_skills,
+                n=3,
+            )
+            session.followup_questions = questions
+            logger.info(f"[Screening] Generated {len(questions)} follow-up questions via Gemini")
+        except Exception as e:
+            # Don't fail the whole intro upload if question generation fails
+            logger.warning(f"[Screening] Follow-up question generation failed: {e}")
+            session.followup_questions = _default_questions()
+
     db.commit()
     db.refresh(session)
     return session
+
+
+def _default_questions() -> list:
+    """Generic fallback questions when AI generation is unavailable."""
+    return [
+        "Tell me about a challenging technical problem you solved recently.",
+        "Describe a project where you had to make an important architectural decision.",
+        "How do you approach debugging a production issue you've never seen before?",
+    ]
 
 
 # ─── UPLOAD ANSWER AUDIO ──────────────────────────────────────
@@ -225,10 +257,13 @@ async def upload_answer(
 # ─── COMPLETE SCREENING ───────────────────────────────────────
 
 @router.post("/complete", response_model=ScreeningSessionResponse)
-def complete_screening(session_id: UUID, db: Session = Depends(get_db)):
+async def complete_screening(session_id: UUID, db: Session = Depends(get_db)):
     """
     Mark the session complete → update candidate status → fire AI evaluation.
-    The evaluation runs async via Celery so this endpoint returns immediately.
+
+    Evaluation mode (set via ASYNC_EVAL in .env):
+      - ASYNC_EVAL=false (default): runs evaluation synchronously before returning.
+      - ASYNC_EVAL=true:            queues a Celery background task and returns immediately.
     """
     session = db.query(ScreeningSession).filter(ScreeningSession.id == session_id).first()
     if not session:
@@ -245,13 +280,29 @@ def complete_screening(session_id: UUID, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(session)
 
-    # ── Fire background evaluation task ──────────────────────
-    try:
-        from services.background.tasks import evaluate_candidate_task
-        evaluate_candidate_task.delay(str(session_id))
-        logger.info(f"[Screening] Evaluation task queued for session {session_id}")
-    except Exception as e:
-        # Celery/Redis might not be running in dev — log but don't fail the request
-        logger.warning(f"[Screening] Could not queue evaluation task: {e}")
+    # ── Fire evaluation ───────────────────────────────────────
+    if settings.ASYNC_EVAL:
+        # Production: Celery background task
+        try:
+            from services.background.tasks import evaluate_candidate_task
+            evaluate_candidate_task.delay(str(session_id))
+            logger.info(f"[Screening] Evaluation task queued for session {session_id}")
+        except Exception as e:
+            logger.warning(f"[Screening] Could not queue evaluation task: {e}")
+    else:
+        # Dev mode: run synchronously
+        try:
+            from services.pipeline.evaluator import run_evaluation
+            logger.info(f"[Screening] Running evaluation synchronously for session {session_id}")
+            score = await run_evaluation(session.id, db)
+            if score:
+                logger.info(f"[Screening] Evaluation complete — score: {score.total_score}")
+            else:
+                logger.warning(f"[Screening] Evaluation returned None for session {session_id}")
+        except Exception as e:
+            # Don't fail the /complete endpoint if evaluation crashes
+            logger.error(f"[Screening] Evaluation error: {e}", exc_info=True)
 
+    # Refresh session after evaluation may have updated candidate status
+    db.refresh(session)
     return session
