@@ -42,6 +42,7 @@ COMPETENCY_KEYS = [
     "ownership_signals",
     "curiosity_depth",
     "multilingual_fluency",
+    "eq_score",
 ]
 
 DEFAULT_WEIGHTS = {
@@ -51,6 +52,7 @@ DEFAULT_WEIGHTS = {
     "ownership_signals": 0.15,
     "curiosity_depth": 0.10,
     "multilingual_fluency": 0.10,
+    "eq_score": 0.10,
 }
 
 
@@ -128,6 +130,7 @@ async def run_evaluation(session_id: uuid.UUID, db: Session) -> Optional[Compete
         ownership_signals=scores.get("ownership_signals"),
         curiosity_depth=scores.get("curiosity_depth"),
         multilingual_fluency=scores.get("multilingual_fluency"),
+        eq_score=scores.get("eq_score"),
         total_score=round(total_score, 2),
         justifications=justifications,
         flags=flags,
@@ -301,6 +304,7 @@ def _heuristic_scorer(text: str, required_skills: list) -> tuple[dict, dict, lis
         "ownership_signals":  round(signal_score(ownership_kws, base=4.5), 1),
         "curiosity_depth":    round(signal_score(curiosity_kws, base=4.5), 1),
         "multilingual_fluency": round(signal_score(multilingual_kws, base=5.0), 1),
+        "eq_score":           round(signal_score(["confident", "excited", "happy"], base=5.0), 1),
     }
 
     justifications = {
@@ -310,6 +314,7 @@ def _heuristic_scorer(text: str, required_skills: list) -> tuple[dict, dict, lis
         "ownership_signals":  f"Score based on first-person ownership language.",
         "curiosity_depth":    f"Score based on learning and exploration signals.",
         "multilingual_fluency": f"Score based on multilingual context in responses.",
+        "eq_score":           f"Score based on emotional intelligence and tone markers.",
     }
 
     flags = [k for k, v in scores.items() if v < 5.0]

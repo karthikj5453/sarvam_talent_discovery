@@ -48,6 +48,7 @@ class CandidateBase(BaseModel):
     name: Optional[str] = None
     email: EmailStr
     phone: Optional[str] = None
+    github_url: Optional[str] = None
     job_id: UUID
 
 class CandidateCreate(CandidateBase):
@@ -56,6 +57,7 @@ class CandidateCreate(CandidateBase):
 class CandidateResponse(CandidateBase):
     id: UUID
     resume_url: Optional[str] = None
+    github_url: Optional[str] = None
     detected_language: Optional[str] = None
     status: str
     created_at: datetime
@@ -89,6 +91,7 @@ class ScreeningSessionResponse(BaseModel):
     intro_language: Optional[str] = None
     followup_questions: Optional[List[Any]] = []   # list of strings or dicts from DB
     followup_answers: Optional[List[Any]] = []     # list of {transcript, audio_url} dicts
+    proctoring_flags: Optional[Dict[str, Any]] = None
     total_duration_seconds: Optional[int] = None
     completed_at: Optional[datetime] = None
     created_at: datetime

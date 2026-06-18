@@ -1,37 +1,27 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
-import { Mic, Square, RotateCcw, Send, AlertCircle, Info } from 'lucide-react';
+import { Mic, Square, RotateCcw, ChevronRight, AlertCircle, CheckCircle } from 'lucide-react';
+
+const STEPS = ['Apply', 'Intro', 'Interview', 'Done'];
+const WAVEFORM_BARS = 12;
 
 export default function Intro() {
-  const [session, setSession] = useState(null);
   const [recording, setRecording] = useState(false);
   const [audioUrl, setAudioUrl] = useState(null);
   const [audioBlob, setAudioBlob] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  
+
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
   const navigate = useNavigate();
 
   const sessionId = sessionStorage.getItem('screening_session_id');
-  const candidateName = sessionStorage.getItem('candidate_name') || 'Candidate';
+  const candidateName = sessionStorage.getItem('candidate_name') || 'there';
 
   useEffect(() => {
-    if (!sessionId) {
-      navigate('/');
-    } else {
-      async function loadSession() {
-        try {
-          const s = await api.startScreening(sessionStorage.getItem('candidate_id') || '');
-          setSession(s);
-        } catch (_) {
-          // It's okay if session load fails, we already have sessionId
-        }
-      }
-      loadSession();
-    }
+    if (!sessionId) navigate('/');
   }, [sessionId, navigate]);
 
   const startRecording = async () => {
@@ -39,26 +29,19 @@ export default function Intro() {
     audioChunksRef.current = [];
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaRecorderRef.current = new MediaRecorder(stream, { mimeType: 'audio/webm' });
-      
-      mediaRecorderRef.current.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
-        }
-      };
-
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/ogg';
+      mediaRecorderRef.current = new MediaRecorder(stream, { mimeType });
+      mediaRecorderRef.current.ondataavailable = e => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
       mediaRecorderRef.current.onstop = () => {
         const blob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
         setAudioBlob(blob);
         setAudioUrl(URL.createObjectURL(blob));
-        // Stop all audio tracks to release microphone
-        stream.getTracks().forEach(track => track.stop());
+        stream.getTracks().forEach(t => t.stop());
       };
-
       mediaRecorderRef.current.start();
       setRecording(true);
-    } catch (err) {
-      setError('Could not access microphone. Please grant permission.');
+    } catch {
+      setError('Microphone access denied. Please allow mic access and try again.');
     }
   };
 
@@ -69,22 +52,17 @@ export default function Intro() {
     }
   };
 
-  const handleReset = () => {
-    setAudioUrl(null);
-    setAudioBlob(null);
-    setError(null);
-  };
+  const handleReset = () => { setAudioUrl(null); setAudioBlob(null); setError(null); };
 
   const handleSubmit = async () => {
     if (!audioBlob) return;
     setLoading(true);
     setError(null);
-
     try {
       await api.uploadIntro(sessionId, audioBlob);
       navigate('/interview');
     } catch (err) {
-      setError(err.message || 'Failed to upload audio. Please try again.');
+      setError(err.message || 'Upload failed. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -92,71 +70,87 @@ export default function Intro() {
 
   return (
     <div className="app-container">
-      <div className="glass-card">
-        <h1 className="title-gradient" style={{ fontSize: '2rem' }}>Hello, {candidateName}!</h1>
-        <p className="subtitle" style={{ marginBottom: '1.5rem' }}>
-          Let's start with a brief voice introduction.
-        </p>
+      {/* Progress */}
+      <div className="progress-steps" style={{ marginBottom: '2rem' }}>
+        {STEPS.map((s, i) => (
+          <div key={s} className="step-item">
+            <div className={`step-dot ${i === 1 ? 'active' : i < 1 ? 'done' : ''}`}>{i < 1 ? '✓' : i + 1}</div>
+            {i < STEPS.length - 1 && <div className={`step-line ${i < 1 ? 'done' : ''}`} />}
+          </div>
+        ))}
+      </div>
 
-        <div style={{ background: 'rgba(99, 102, 241, 0.1)', border: '1px solid rgba(99, 102, 241, 0.2)', padding: '1rem', borderRadius: '0.75rem', display: 'flex', gap: '0.5rem', marginBottom: '2rem' }}>
-          <Info size={20} style={{ color: 'var(--primary)', flexShrink: 0 }} />
-          <p style={{ fontSize: '0.875rem', color: 'var(--text-light)', lineHeight: 1.4 }}>
-            <strong>Language Agnostic:</strong> You can speak in <strong>English, Hindi, Tamil, Telugu, Kannada, Malayalam, Marathi, Bengali, Gujarati, or Punjabi</strong>. Speak naturally for up to 30 seconds, describing your experience and interest.
+      <div className="glass-card">
+        {/* Header */}
+        <div style={{ textAlign: 'center', marginBottom: '1.75rem' }}>
+          <h1 className="title-gradient" style={{ fontSize: '1.85rem' }}>Hi, {candidateName}!</h1>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginTop: '0.25rem' }}>
+            Record a 20–30 second voice introduction about yourself.
           </p>
         </div>
 
+        {/* Language tip */}
+        <div className="alert alert-info" style={{ marginBottom: '1.75rem' }}>
+          <span style={{ fontSize: '1rem' }}>🌐</span>
+          <span style={{ fontSize: '0.85rem', lineHeight: 1.4 }}>
+            <strong>Speak naturally in any Indian language</strong> — Hindi, Tamil, Telugu, Kannada, Malayalam, Marathi, Bengali, Gujarati, or Punjabi.
+          </span>
+        </div>
+
         {error && (
-          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', background: 'rgba(239, 68, 68, 0.15)', color: '#fca5a5', padding: '1rem', borderRadius: '0.75rem', marginBottom: '1.5rem', border: '1px solid rgba(239, 68, 68, 0.2)' }}>
-            <AlertCircle size={20} style={{ flexShrink: 0 }} />
-            <span style={{ fontSize: '0.9rem' }}>{error}</span>
+          <div className="alert alert-error">
+            <AlertCircle size={16} style={{ flexShrink: 0 }} />
+            {error}
           </div>
         )}
 
-        <div className="recording-container">
+        {/* Recording UI */}
+        <div className="recording-area">
+          {/* Waveform (only while recording) */}
           {recording && (
             <div className="waveform">
-              <div className="waveform-bar"></div>
-              <div className="waveform-bar"></div>
-              <div className="waveform-bar"></div>
-              <div className="waveform-bar"></div>
-              <div className="waveform-bar"></div>
-              <div className="waveform-bar"></div>
-              <div className="waveform-bar"></div>
-              <div className="waveform-bar"></div>
+              {Array.from({ length: WAVEFORM_BARS }).map((_, i) => (
+                <div key={i} className="waveform-bar" />
+              ))}
             </div>
           )}
 
           {!audioUrl ? (
-            <button 
-              className={`record-btn-glow ${recording ? 'recording' : ''}`}
-              onClick={recording ? stopRecording : startRecording}
-            >
-              {recording ? <Square size={32} color="#fff" /> : <Mic size={32} color="#fff" />}
-            </button>
+            <>
+              <button
+                className={`record-btn ${recording ? 'recording' : 'idle'}`}
+                onClick={recording ? stopRecording : startRecording}
+                aria-label={recording ? 'Stop recording' : 'Start recording'}
+              >
+                {recording ? <Square size={28} color="#fff" /> : <Mic size={28} color="#fff" />}
+              </button>
+              <p className={`record-status ${recording ? 'live' : ''}`}>
+                {recording ? 'Recording… click to stop' : 'Click the mic to start'}
+              </p>
+            </>
           ) : (
-            <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '1rem', alignItems: 'center' }}>
-              <p style={{ fontSize: '0.9rem', color: 'var(--success)', fontWeight: 500 }}>✓ Recording ready to upload</p>
-              <audio src={audioUrl} controls style={{ width: '100%', maxWidth: '300px' }} />
+            <div className="audio-preview" style={{ width: '100%' }}>
+              <div className="audio-preview-label">
+                <CheckCircle size={14} /> Recording ready
+              </div>
+              <audio src={audioUrl} controls />
             </div>
           )}
-
-          <p style={{ fontSize: '0.95rem', color: 'var(--text-muted)' }}>
-            {recording ? 'Recording... click to stop' : audioUrl ? 'Review your voice introduction' : 'Click microphone to start recording'}
-          </p>
         </div>
 
-        <div style={{ display: 'flex', gap: '1rem', marginTop: '2rem' }}>
+        {/* Actions */}
+        <div style={{ display: 'flex', gap: '0.875rem', marginTop: '0.5rem' }}>
           {audioUrl && (
-            <button className="btn" onClick={handleReset} style={{ background: 'rgba(255,255,255,0.05)', color: '#fff' }} disabled={loading}>
-              <RotateCcw size={18} /> Record Again
+            <button className="btn btn-ghost" onClick={handleReset} disabled={loading} style={{ flexShrink: 0, width: 'auto', padding: '0.9rem 1.25rem' }}>
+              <RotateCcw size={16} /> Redo
             </button>
           )}
-          <button 
-            className="btn btn-primary" 
-            onClick={handleSubmit} 
+          <button
+            className="btn btn-primary"
+            onClick={handleSubmit}
             disabled={!audioBlob || loading}
           >
-            <Send size={18} /> {loading ? 'Uploading...' : 'Next Step'}
+            {loading ? <><span className="spinner" /> Uploading...</> : <>Next Step <ChevronRight size={16} /></>}
           </button>
         </div>
       </div>

@@ -63,6 +63,7 @@ def create_candidate(
         name=payload.name,
         email=str(payload.email),
         phone=payload.phone,
+        github_url=payload.github_url,
         job_id=payload.job_id,
         status="applied",
     )
@@ -145,6 +146,7 @@ def public_apply(payload: CandidateCreate, db: Session = Depends(get_db)):
         name=payload.name,
         email=str(payload.email),
         phone=payload.phone,
+        github_url=payload.github_url,
         job_id=payload.job_id,
         status="applied",
     )

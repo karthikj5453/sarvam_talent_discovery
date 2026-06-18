@@ -23,11 +23,12 @@ async function request(endpoint, options = {}) {
 
   if (!response.ok) {
     let errorDetail = 'API error';
+    const text = await response.text();
     try {
-      const data = await response.json();
-      errorDetail = data.detail || errorDetail;
+      const data = JSON.parse(text);
+      errorDetail = data.detail || text;
     } catch (_) {
-      errorDetail = await response.text();
+      errorDetail = text || errorDetail;
     }
     throw new Error(errorDetail);
   }

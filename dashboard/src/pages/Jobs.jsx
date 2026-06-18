@@ -86,18 +86,25 @@ export default function Jobs() {
   };
 
   if (loading) {
-    return <p style={{ color: 'var(--text-secondary)' }}>Loading job profiles...</p>;
+    return (
+      <div>
+        <div className="page-header">
+          <div className="skeleton" style={{ height: 28, width: 160, marginBottom: 8 }} />
+          <div className="skeleton" style={{ height: 16, width: 280 }} />
+        </div>
+      </div>
+    );
   }
 
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2.5rem' }}>
-        <div>
-          <h1 style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--text-primary)', marginBottom: '0.25rem' }}>Job Profiles</h1>
-          <p style={{ color: 'var(--text-secondary)' }}>Manage role configurations and weightings for candidate evaluations.</p>
+        <div className="page-header" style={{ marginBottom: 0 }}>
+          <h1 className="page-title">Job Profiles</h1>
+          <p className="page-subtitle">Manage role configurations and competency weightings for AI evaluations.</p>
         </div>
         <button className="btn btn-primary" onClick={() => setShowModal(true)}>
-          <Plus size={16} /> Create Job Profile
+          <Plus size={16} /> New Job Profile
         </button>
       </div>
 
@@ -143,8 +150,12 @@ export default function Jobs() {
             ))}
             {jobs.length === 0 && (
               <tr>
-                <td colSpan="5" style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
-                  No active job listings found. Click "Create Job Profile" to add one.
+                <td colSpan="5">
+                  <div className="empty-state">
+                    <div className="empty-state-icon"><Briefcase size={22} /></div>
+                    <p style={{ fontWeight: 600, color: 'var(--text-secondary)', fontSize: '0.9rem' }}>No job profiles yet</p>
+                    <p style={{ fontSize: '0.82rem' }}>Click "New Job Profile" to create the first one.</p>
+                  </div>
                 </td>
               </tr>
             )}
@@ -154,19 +165,18 @@ export default function Jobs() {
 
       {/* Modal Dialog */}
       {showModal && (
-        <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0,0,0,0.7)', zIndex: 1000, display: 'flex', justifyContent: 'center', alignItems: 'center', overflowY: 'auto', padding: '2rem 1rem' }}>
-          <div style={{ background: 'var(--bg-sidebar)', border: '1px solid var(--border-muted)', borderRadius: '1rem', maxWidth: '600px', width: '100%', padding: '2.5rem', boxShadow: '0 25px 50px rgba(0,0,0,0.5)', display: 'flex', flexDirection: 'column', gap: '1.5rem', animation: 'fadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h2 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#fff' }}>Create Job Profile</h2>
-              <button onClick={() => setShowModal(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}>
-                <X size={20} />
+        <div className="modal-overlay">
+          <div className="modal">
+            <div className="modal-header">
+              <h2 className="modal-title">New Job Profile</h2>
+              <button onClick={() => setShowModal(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
+                <X size={18} />
               </button>
             </div>
 
             {error && (
-              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', background: 'rgba(239, 68, 68, 0.12)', color: '#f87171', padding: '0.75rem 1rem', borderRadius: '0.5rem', border: '1px solid rgba(239, 68, 68, 0.15)', fontSize: '0.85rem' }}>
-                <AlertCircle size={16} style={{ flexShrink: 0 }} />
-                <span>{error}</span>
+              <div className="alert alert-error">
+                <AlertCircle size={15} style={{ flexShrink: 0 }} /> {error}
               </div>
             )}
 
@@ -237,7 +247,7 @@ export default function Jobs() {
                 </button>
               </div>
             </form>
-          </div>
+            </div>
         </div>
       )}
     </div>

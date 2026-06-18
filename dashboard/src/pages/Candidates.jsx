@@ -45,13 +45,22 @@ export default function Candidates() {
   });
 
   if (loading) {
-    return <p style={{ color: 'var(--text-secondary)' }}>Loading candidate ledger...</p>;
+    return (
+      <div>
+        <div className="page-header">
+          <div className="skeleton" style={{ height: 28, width: 220, marginBottom: 8 }} />
+          <div className="skeleton" style={{ height: 16, width: 380 }} />
+        </div>
+      </div>
+    );
   }
 
   return (
     <div>
-      <h1 style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--text-primary)', marginBottom: '0.25rem' }}>Candidates Directory</h1>
-      <p style={{ color: 'var(--text-secondary)', marginBottom: '2.5rem' }}>Review applicants, track screening progress, and inspect evaluation metrics.</p>
+      <div className="page-header">
+        <h1 className="page-title">Candidates Directory</h1>
+        <p className="page-subtitle">Review applicants, track screening progress, and inspect AI evaluation scores.</p>
+      </div>
 
       {/* Filter and Search Bar Layout */}
       <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginBottom: '2rem' }}>

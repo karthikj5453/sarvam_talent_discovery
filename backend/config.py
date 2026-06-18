@@ -43,6 +43,13 @@ class Settings(BaseSettings):
     DEBUG: bool = True
     CORS_ORIGINS: List[str] = ["http://localhost:5173", "http://localhost:5174", "http://localhost:3000"]
 
+    # ─── SMTP Email Notifications ─────────────────────────────────
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM_EMAIL: str = "noreply@sarvam.ai"
+
     def use_local_storage(self) -> bool:
         """Returns True if AWS creds are absent/placeholder — use local disk storage."""
         placeholder = {"your_aws_key", "your_aws_secret", "", "your_key", "your_secret"}

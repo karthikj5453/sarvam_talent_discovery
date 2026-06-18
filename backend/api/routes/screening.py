@@ -186,6 +186,7 @@ async def upload_intro(
                 intro_transcript=final_transcript,
                 job_title=job_title,
                 required_skills=required_skills,
+                github_url=candidate.github_url if candidate else None,
                 n=3,
             )
             session.followup_questions = questions
@@ -270,7 +271,11 @@ async def upload_answer(
 # ─── COMPLETE SCREENING ───────────────────────────────────────
 
 @router.post("/complete", response_model=ScreeningSessionResponse)
-async def complete_screening(session_id: UUID, db: Session = Depends(get_db)):
+async def complete_screening(
+    session_id: UUID,
+    proctoring_flags: Optional[dict] = None,
+    db: Session = Depends(get_db)
+):
     """
     Mark the session complete → update candidate status → fire AI evaluation.
 
@@ -285,6 +290,8 @@ async def complete_screening(session_id: UUID, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Session already completed")
 
     session.completed_at = datetime.now(timezone.utc)
+    if proctoring_flags:
+        session.proctoring_flags = proctoring_flags
 
     candidate = db.query(Candidate).filter(Candidate.id == session.candidate_id).first()
     if candidate:

@@ -41,6 +41,7 @@ class Candidate(Base):
     job_id = Column(UUID(as_uuid=True), ForeignKey("jobs.id"))
     resume_url = Column(Text)
     resume_text = Column(Text)          # extracted plain-text from PDF (via PyMuPDF)
+    github_url = Column(String(255))
     detected_language = Column(String(50))
     status = Column(String(50), default="applied")
     # applied → screened → shortlisted → interviewing → offered → rejected
@@ -58,6 +59,7 @@ class ScreeningSession(Base):
     intro_language = Column(String(50))
     followup_questions = Column(JSONB)     # [{question, audio_url, transcript}]
     followup_answers = Column(JSONB)       # [{answer_audio_url, transcript}]
+    proctoring_flags = Column(JSONB)       # {"tab_switches": 2, "paste_events": 1}
     total_duration_seconds = Column(Integer)
     completed_at = Column(TIMESTAMP)
     created_at = Column(TIMESTAMP, server_default=func.now())
@@ -75,6 +77,7 @@ class CompetencyScore(Base):
     ownership_signals = Column(Float)
     curiosity_depth = Column(Float)
     multilingual_fluency = Column(Float)
+    eq_score = Column(Float)
     total_score = Column(Float)
     justifications = Column(JSONB)         # {"technical_depth": "reason..."}
     flags = Column(JSONB)                  # ["low_shipping_velocity", ...]

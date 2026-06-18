@@ -114,6 +114,8 @@ Based on the candidate's introduction, generate {n} highly relevant follow-up in
 Role: {job_title}
 Required Skills: {required_skills}
 
+{github_context}
+
 Rules:
 - Questions must be specific to what the candidate mentioned, not generic
 - Mix technical depth, problem-solving, and behavioral questions
@@ -139,6 +141,7 @@ async def generate_followup_questions(
     intro_transcript: str,
     job_title: str,
     required_skills: list,
+    github_url: Optional[str] = None,
     n: int = 3,
 ) -> list[str]:
     """
@@ -153,10 +156,17 @@ async def generate_followup_questions(
         model = _get_model()
         skills_str = ", ".join(required_skills) if required_skills else "General Software Engineering"
 
+        github_ctx = ""
+        if github_url:
+            github_data = _fetch_github_context(github_url)
+            if github_data:
+                github_ctx = f"GitHub Context (from {github_url}):\n{github_data}\nPlease ask one hyper-specific question related to one of these repositories."
+
         system = QUESTION_SYSTEM_PROMPT.format(
             n=n,
             job_title=job_title,
             required_skills=skills_str,
+            github_context=github_ctx,
         )
         user = QUESTION_USER_PROMPT.format(
             intro_transcript=intro_transcript,
@@ -213,6 +223,33 @@ async def generate_followup_questions(
     # ── Fallback: generic questions ─────────────────────────
     return _fallback_questions(job_title, n)
 
+import urllib.request
+import urllib.error
+
+def _fetch_github_context(github_url: str) -> str:
+    """Extract username from URL and fetch top 3 repos from GitHub API."""
+    try:
+        # crude extraction
+        parts = github_url.rstrip("/").split("/")
+        username = parts[-1]
+        if not username:
+            return ""
+            
+        url = f"https://api.github.com/users/{username}/repos?sort=updated&per_page=3"
+        req = urllib.request.Request(url, headers={'User-Agent': 'Sarvam-Talent-AI'})
+        with urllib.request.urlopen(req, timeout=3) as response:
+            data = json.loads(response.read().decode())
+            
+        repos = []
+        for r in data:
+            desc = r.get("description") or "No description"
+            lang = r.get("language") or "Unknown"
+            repos.append(f"- {r['name']} ({lang}): {desc}")
+            
+        return "\n".join(repos)
+    except Exception as e:
+        logger.warning(f"[GitHub] Failed to fetch context for {github_url}: {e}")
+        return ""
 
 def _fallback_questions(job_title: str, n: int = 3) -> list[str]:
     """Generic fallback questions when Gemini is unavailable."""

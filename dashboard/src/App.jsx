@@ -6,6 +6,7 @@ import Overview from './pages/Overview';
 import Jobs from './pages/Jobs';
 import Candidates from './pages/Candidates';
 import CandidateDetails from './pages/CandidateDetails';
+import ThemeToggle from './components/ThemeToggle';
 
 // Simple Route Guard to protect HR pages
 function ProtectedRoute({ children }) {
@@ -13,7 +14,12 @@ function ProtectedRoute({ children }) {
   if (!token) {
     return <Navigate to="/login" replace />;
   }
-  return <SidebarLayout>{children}</SidebarLayout>;
+  return (
+    <>
+      <ThemeToggle />
+      <SidebarLayout>{children}</SidebarLayout>
+    </>
+  );
 }
 
 export default function App() {

@@ -1,7 +1,31 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../services/api';
-import { Users, Briefcase, Award, Percent, HelpCircle } from 'lucide-react';
+import { Users, Briefcase, Award, TrendingUp, HelpCircle } from 'lucide-react';
 import { Link } from 'react-router-dom';
+
+const STAGE_COLORS = {
+  applied:      { color: '#60a5fa', bg: 'rgba(59,130,246,0.15)' },
+  screened:     { color: '#34d399', bg: 'rgba(16,185,129,0.15)' },
+  shortlisted:  { color: '#a78bfa', bg: 'rgba(139,92,246,0.15)' },
+  interviewing: { color: '#fbbf24', bg: 'rgba(245,158,11,0.15)' },
+  offered:      { color: '#f9a8d4', bg: 'rgba(236,72,153,0.15)' },
+  rejected:     { color: '#f87171', bg: 'rgba(239,68,68,0.15)' },
+};
+
+function StatCard({ icon: Icon, label, value, unit, color, bgColor, delay = '0s' }) {
+  return (
+    <div className="dashboard-card" style={{ animationDelay: delay }}>
+      <div className="stat-icon-wrap" style={{ background: bgColor }}>
+        <Icon size={18} style={{ color }} />
+      </div>
+      <p className="card-label">{label}</p>
+      <p className="card-value" style={{ animationDelay: delay }}>
+        {value}
+        {unit && <span className="card-value-unit">{unit}</span>}
+      </p>
+    </div>
+  );
+}
 
 export default function Overview() {
   const [pipeline, setPipeline] = useState({ total_candidates: 0, stages: [] });
@@ -11,177 +35,139 @@ export default function Overview() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    async function loadData() {
-      try {
-        const [pipelineData, funnelData, jobList, evalList] = await Promise.all([
-          api.getPipeline(),
-          api.getFunnel(),
-          api.getJobs(),
-          api.getEvaluations(),
-        ]);
-        setPipeline(pipelineData);
-        setFunnel(funnelData);
-        setJobs(jobList);
-        setEvaluations(evalList);
-      } catch (err) {
-        console.error('Failed to load dashboard overview data:', err);
-      } finally {
-        setLoading(false);
-      }
-    }
-    loadData();
+    Promise.all([
+      api.getPipeline(),
+      api.getFunnel(),
+      api.getJobs(),
+      api.getEvaluations(),
+    ]).then(([p, f, j, e]) => {
+      setPipeline(p);
+      setFunnel(Array.isArray(f) ? f : []);
+      setJobs(j);
+      setEvaluations(e);
+    }).catch(console.error)
+      .finally(() => setLoading(false));
   }, []);
-
-  if (loading) {
-    return <p style={{ color: 'var(--text-secondary)' }}>Loading overview metrics...</p>;
-  }
 
   const totalCandidates = pipeline.total_candidates || 0;
   const activeJobs = jobs.length;
-
-  // Average score from evaluations
   const scoredEvals = evaluations.filter(e => e.total_score != null);
   const avgScore = scoredEvals.length > 0
-    ? scoredEvals.reduce((acc, e) => acc + e.total_score, 0) / scoredEvals.length
-    : 0;
+    ? (scoredEvals.reduce((s, e) => s + e.total_score, 0) / scoredEvals.length).toFixed(1)
+    : '—';
+  const shortlisted = pipeline.stages?.find(s => s.status === 'shortlisted')?.count || 0;
+  const shortlistRate = totalCandidates > 0 ? Math.round((shortlisted / totalCandidates) * 100) : 0;
 
-  // Shortlisted count from pipeline stages
-  const shortlistedStage = pipeline.stages?.find(s => s.status === 'shortlisted');
-  const shortlistedCount = shortlistedStage?.count || 0;
-  const shortlistRate = totalCandidates > 0
-    ? Math.round((shortlistedCount / totalCandidates) * 100)
-    : 0;
+  const stageData = (pipeline.stages || []).filter(s => s.count > 0);
+  const maxStageCount = Math.max(...stageData.map(s => s.count), 1);
 
-  // Funnel data: backend returns [{stage, count}]
-  const funnelItems = Array.isArray(funnel) ? funnel : [];
-  const maxFunnelCount = Math.max(...funnelItems.map(f => f.count), 1);
-
-  // Language distribution: derive from pipeline stages (no dedicated endpoint)
-  const stageData = pipeline.stages || [];
+  if (loading) {
+    return (
+      <div>
+        <div className="page-header">
+          <div className="skeleton" style={{ height: 28, width: 200, marginBottom: 8 }} />
+          <div className="skeleton" style={{ height: 16, width: 320 }} />
+        </div>
+        <div className="dashboard-grid">
+          {[...Array(4)].map((_, i) => (
+            <div key={i} className="dashboard-card">
+              <div className="skeleton" style={{ height: 40, width: 40, borderRadius: '0.75rem', marginBottom: '1.25rem' }} />
+              <div className="skeleton" style={{ height: 12, width: 80, marginBottom: 8 }} />
+              <div className="skeleton" style={{ height: 36, width: 60 }} />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div>
-      <h1 style={{ fontSize: '1.75rem', fontWeight: 800, color: 'var(--text-primary)', marginBottom: '0.25rem' }}>HR Command Center</h1>
-      <p style={{ color: 'var(--text-secondary)', marginBottom: '2.5rem' }}>Overview of multilingual hiring funnel and candidate rankings.</p>
+      <div className="page-header">
+        <h1 className="page-title">HR Command Center</h1>
+        <p className="page-subtitle">Overview of your multilingual hiring funnel and candidate pipeline.</p>
+      </div>
 
-      {/* Stats Cards Grid */}
+      {/* Stat cards */}
       <div className="dashboard-grid">
-        <div className="dashboard-card" style={{ borderLeft: '4px solid var(--primary)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <div>
-              <p className="card-title">Active Job Roles</p>
-              <h2 className="card-value">{activeJobs}</h2>
-            </div>
-            <div style={{ background: 'var(--primary-glow)', padding: '0.75rem', borderRadius: '0.5rem', color: 'var(--primary-light)' }}>
-              <Briefcase size={22} />
-            </div>
-          </div>
-        </div>
-
-        <div className="dashboard-card" style={{ borderLeft: '4px solid #3b82f6' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <div>
-              <p className="card-title">Total Candidates</p>
-              <h2 className="card-value">{totalCandidates}</h2>
-            </div>
-            <div style={{ background: 'rgba(59, 130, 246, 0.12)', padding: '0.75rem', borderRadius: '0.5rem', color: '#60a5fa' }}>
-              <Users size={22} />
-            </div>
-          </div>
-        </div>
-
-        <div className="dashboard-card" style={{ borderLeft: '4px solid var(--success)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <div>
-              <p className="card-title">Avg Competency Score</p>
-              <h2 className="card-value">{avgScore.toFixed(1)}<span style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>/10</span></h2>
-            </div>
-            <div style={{ background: 'rgba(16, 185, 129, 0.12)', padding: '0.75rem', borderRadius: '0.5rem', color: '#34d399' }}>
-              <Award size={22} />
-            </div>
-          </div>
-        </div>
-
-        <div className="dashboard-card" style={{ borderLeft: '4px solid var(--accent)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <div>
-              <p className="card-title">Shortlist Rate</p>
-              <h2 className="card-value">{shortlistRate}%</h2>
-            </div>
-            <div style={{ background: 'rgba(139, 92, 246, 0.12)', padding: '0.75rem', borderRadius: '0.5rem', color: '#a78bfa' }}>
-              <Percent size={22} />
-            </div>
-          </div>
-        </div>
+        <StatCard icon={Briefcase} label="Active Roles" value={activeJobs}
+          color="#818cf8" bgColor="rgba(99,102,241,0.12)" delay="0s" />
+        <StatCard icon={Users} label="Total Candidates" value={totalCandidates}
+          color="#60a5fa" bgColor="rgba(59,130,246,0.12)" delay="0.05s" />
+        <StatCard icon={Award} label="Avg AI Score" value={avgScore} unit="/10"
+          color="#34d399" bgColor="rgba(16,185,129,0.12)" delay="0.1s" />
+        <StatCard icon={TrendingUp} label="Shortlist Rate" value={`${shortlistRate}%`}
+          color="#a78bfa" bgColor="rgba(139,92,246,0.12)" delay="0.15s" />
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr', gap: '2rem', marginTop: '2rem' }}>
+      {/* Two-panel grid */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1.3fr 0.7fr', gap: '1.5rem', marginTop: '0.5rem' }}>
 
-        {/* Hiring Pipeline Funnel */}
-        <div className="dashboard-card">
-          <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '1.5rem' }}>Hiring Pipeline Funnel</h3>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-            {funnelItems.map(({ stage, count }) => {
-              const percentage = Math.round((count / maxFunnelCount) * 100);
-              return (
-                <div key={stage} style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
-                    <span style={{ textTransform: 'capitalize', fontWeight: 600, color: 'var(--text-primary)' }}>{stage}</span>
-                    <span style={{ color: 'var(--text-secondary)' }}>{count} candidates ({percentage}%)</span>
-                  </div>
-                  <div style={{ height: '24px', background: 'rgba(255,255,255,0.03)', borderRadius: '4px', overflow: 'hidden' }}>
-                    <div style={{ height: '100%', width: `${percentage}%`, background: `linear-gradient(90deg, var(--primary) 0%, var(--primary-light) 100%)`, borderRadius: '4px', transition: 'width 0.6s' }}></div>
-                  </div>
-                </div>
-              );
-            })}
-            {funnelItems.length === 0 && (
-              <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>No candidates in pipeline yet.</p>
-            )}
+        {/* Pipeline funnel */}
+        <div className="dashboard-card" style={{ animationDelay: '0.2s' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+            <h3 style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--text-primary)' }}>Pipeline Stages</h3>
+            <Link to="/candidates" style={{ fontSize: '0.75rem', color: 'var(--primary-light)', textDecoration: 'none', fontWeight: 600 }}>
+              View all →
+            </Link>
           </div>
-        </div>
-
-        {/* Pipeline Stage Distribution */}
-        <div className="dashboard-card">
-          <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '1.5rem' }}>Pipeline Stage Breakdown</h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            {stageData.filter(s => s.count > 0).map(({ status, count }) => {
-              const pct = totalCandidates > 0 ? Math.round((count / totalCandidates) * 100) : 0;
-              const color = status === 'shortlisted' ? '#10b981'
-                : status === 'screened' ? '#818cf8'
-                : status === 'offered' ? '#f59e0b'
-                : status === 'rejected' ? '#ef4444'
-                : 'var(--primary-light)';
+            {stageData.map(({ status, count }) => {
+              const pct = Math.round((count / maxStageCount) * 100);
+              const c = STAGE_COLORS[status] || { color: '#94a3b8', bg: 'rgba(148,163,184,0.1)' };
               return (
-                <div key={status} style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
-                    <span style={{ fontWeight: 500, color: 'var(--text-primary)', textTransform: 'capitalize' }}>{status}</span>
-                    <span style={{ color: 'var(--text-secondary)' }}>{count} ({pct}%)</span>
+                <div key={status}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.4rem' }}>
+                    <span style={{ fontSize: '0.8rem', fontWeight: 500, color: 'var(--text-primary)', textTransform: 'capitalize' }}>{status}</span>
+                    <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: 500 }}>{count}</span>
                   </div>
-                  <div style={{ height: '8px', background: 'rgba(255,255,255,0.03)', borderRadius: '4px', overflow: 'hidden' }}>
-                    <div style={{ height: '100%', width: `${pct}%`, background: color, borderRadius: '4px', transition: 'width 0.6s' }}></div>
+                  <div className="funnel-bar-bg">
+                    <div className="funnel-bar-fill" style={{ width: `${pct}%`, background: `linear-gradient(90deg, ${c.color}99, ${c.color})` }}>
+                      {pct > 15 && `${pct}%`}
+                    </div>
                   </div>
                 </div>
               );
             })}
-            {stageData.every(s => s.count === 0) && (
-              <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>No candidates yet.</p>
+            {stageData.length === 0 && (
+              <div className="empty-state" style={{ padding: '2rem' }}>
+                <p>No candidates yet. Share the candidate portal link to get started.</p>
+              </div>
             )}
           </div>
         </div>
 
-      </div>
+        {/* Right column */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+          {/* Evaluation summary */}
+          <div className="dashboard-card" style={{ animationDelay: '0.25s' }}>
+            <h3 style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '1rem' }}>Screening Activity</h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
+              {[
+                { label: 'Evaluations run', value: scoredEvals.length },
+                { label: 'Shortlisted', value: shortlisted },
+                { label: 'Open positions', value: activeJobs },
+              ].map(({ label, value }) => (
+                <div key={label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>{label}</span>
+                  <span style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-primary)' }}>{value}</span>
+                </div>
+              ))}
+            </div>
+          </div>
 
-      {/* Prompt Guide / Alert Callout */}
-      <div className="dashboard-card" style={{ marginTop: '2.5rem', background: 'rgba(99,102,241,0.03)', border: '1px dashed rgba(99,102,241,0.25)', display: 'flex', gap: '1rem', alignItems: 'flex-start' }}>
-        <div style={{ background: 'var(--primary-glow)', padding: '0.5rem', borderRadius: '50%', color: 'var(--primary-light)' }}>
-          <HelpCircle size={18} />
-        </div>
-        <div>
-          <h4 style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.25rem' }}>HR Tip: Customize Competency Weights</h4>
-          <p style={{ fontSize: '0.825rem', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
-            Go to the <strong>Jobs</strong> tab to create active role profiles and configure the exact weights for your 6 competency metrics. Our Sarvam evaluator pipeline automatically calculates total candidate scores based on these preferences!
-          </p>
+          {/* Tip */}
+          <div className="dashboard-card" style={{ animationDelay: '0.3s', borderColor: 'rgba(99,102,241,0.2)', background: 'rgba(99,102,241,0.04)' }}>
+            <div style={{ display: 'flex', gap: '0.75rem' }}>
+              <HelpCircle size={16} style={{ color: 'var(--primary-light)', flexShrink: 0, marginTop: '0.1rem' }} />
+              <div>
+                <p style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.35rem' }}>Quick Tip</p>
+                <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                  Configure competency weights per job role in the <strong>Jobs</strong> tab to tune AI scoring for your team's priorities.
+                </p>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>

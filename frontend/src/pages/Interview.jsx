@@ -1,13 +1,19 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
-import { Mic, Square, RotateCcw, ArrowRight, Volume2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Mic, Square, RotateCcw, ChevronRight, Volume2, CheckCircle, AlertCircle, Code } from 'lucide-react';
+import Editor from '@monaco-editor/react';
+
+const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 const FALLBACK_QUESTIONS = [
-  { question: "Describe a challenging technical problem you solved recently." },
-  { question: "How do you handle deadline pressure and shipping fast?" },
-  { question: "What is your approach to learning new technologies?" }
+  'Describe a challenging technical problem you solved recently.',
+  'How do you handle deadline pressure when shipping fast?',
+  'What is your approach to learning a completely new technology?',
 ];
+
+const STEPS = ['Apply', 'Intro', 'Interview', 'Done'];
+const WAVEFORM_BARS = 12;
 
 export default function Interview() {
   const [questions, setQuestions] = useState([]);
@@ -18,6 +24,15 @@ export default function Interview() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   
+  // New State for Sandbox & Avatar
+  const [isAiSpeaking, setIsAiSpeaking] = useState(false);
+  const [isEngineering, setIsEngineering] = useState(false);
+  const [code, setCode] = useState('// Write your solution here...\n');
+
+  // Proctoring State
+  const [tabSwitches, setTabSwitches] = useState(0);
+  const [pasteEvents, setPasteEvents] = useState(0);
+
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
   const navigate = useNavigate();
@@ -25,68 +40,83 @@ export default function Interview() {
   const sessionId = sessionStorage.getItem('screening_session_id');
 
   useEffect(() => {
-    if (!sessionId) {
-      navigate('/');
-      return;
-    }
+    if (!sessionId) { navigate('/'); return; }
 
-    async function loadSession() {
-      try {
-        const session = await api.getScreeningSession(sessionId); // Note: we should add this helper or fetch directly
-        const qList = session.followup_questions && session.followup_questions.length > 0 
-          ? session.followup_questions 
-          : FALLBACK_QUESTIONS;
-        setQuestions(qList);
-      } catch (_) {
-        setQuestions(FALLBACK_QUESTIONS);
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        setTabSwitches(prev => prev + 1);
       }
-    }
-    
-    // Fetch session details directly
-    fetch(`http://localhost:8000/screening/${sessionId}`)
-      .then(res => res.json())
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    // Fetch session details, then determine if it's an engineering role
+    fetch(`${BASE_URL}/screening/${sessionId}`)
+      .then(r => r.json())
       .then(data => {
-        const qList = data.followup_questions && data.followup_questions.length > 0 
-          ? data.followup_questions 
+        const qs = data.followup_questions?.length
+          ? data.followup_questions.map(q => typeof q === 'string' ? q : q?.question || q)
           : FALLBACK_QUESTIONS;
-        setQuestions(qList);
+        setQuestions(qs);
+        
+        // Optional: fetch candidate details to check job title
+        if (data.candidate_id) {
+          fetch(`${BASE_URL}/candidates/${data.candidate_id}`)
+            .then(res => res.json())
+            .then(candData => {
+              if (candData && candData.candidate && candData.candidate.job_id) {
+                 fetch(`${BASE_URL}/jobs`)
+                   .then(jRes => jRes.json())
+                   .then(jobs => {
+                     const job = jobs.find(j => j.id === candData.candidate.job_id);
+                     if (job && (job.title.toLowerCase().includes('engineer') || job.title.toLowerCase().includes('developer'))) {
+                       setIsEngineering(true);
+                     }
+                   }).catch(e => console.error(e));
+              }
+            }).catch(e => console.error(e));
+        }
       })
-      .catch(() => {
-        setQuestions(FALLBACK_QUESTIONS);
-      });
+      .catch(() => setQuestions(FALLBACK_QUESTIONS));
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, [sessionId, navigate]);
 
   const speakQuestion = () => {
-    if (questions.length === 0) return;
-    const utterance = new SpeechSynthesisUtterance(questions[currentIndex].question);
-    utterance.lang = 'en-IN'; // Indian English accent
-    window.speechSynthesis.speak(utterance);
+    if (!questions[currentIndex]) return;
+    window.speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(questions[currentIndex]);
+    u.lang = 'en-IN';
+    
+    u.onstart = () => setIsAiSpeaking(true);
+    u.onend = () => setIsAiSpeaking(false);
+    u.onerror = () => setIsAiSpeaking(false);
+    
+    window.speechSynthesis.speak(u);
   };
 
   const startRecording = async () => {
     setError(null);
     audioChunksRef.current = [];
+    window.speechSynthesis.cancel(); // stop AI if talking
+    setIsAiSpeaking(false);
+    
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaRecorderRef.current = new MediaRecorder(stream, { mimeType: 'audio/webm' });
-      
-      mediaRecorderRef.current.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
-        }
-      };
-
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/ogg';
+      mediaRecorderRef.current = new MediaRecorder(stream, { mimeType });
+      mediaRecorderRef.current.ondataavailable = e => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
       mediaRecorderRef.current.onstop = () => {
         const blob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
         setAudioBlob(blob);
         setAudioUrl(URL.createObjectURL(blob));
-        stream.getTracks().forEach(track => track.stop());
+        stream.getTracks().forEach(t => t.stop());
       };
-
       mediaRecorderRef.current.start();
       setRecording(true);
-    } catch (err) {
-      setError('Could not access microphone. Please grant permission.');
+    } catch {
+      setError('Microphone access denied. Please allow mic access and try again.');
     }
   };
 
@@ -97,35 +127,28 @@ export default function Interview() {
     }
   };
 
-  const handleReset = () => {
-    setAudioUrl(null);
-    setAudioBlob(null);
-    setError(null);
-  };
+  const handleReset = () => { setAudioUrl(null); setAudioBlob(null); setError(null); };
 
-  const handleSubmitAnswer = async () => {
+  const handleSubmit = async () => {
     if (!audioBlob) return;
     setLoading(true);
     setError(null);
-
     try {
-      // 1. Upload the answer audio to S3 + trigger transcription
+      // Send code along with transcript if we are using the sandbox
+      // (This could be attached to the transcript later, but we upload standard answer first)
       await api.uploadAnswer(sessionId, currentIndex, audioBlob);
-      
-      // Reset recording state
       setAudioUrl(null);
       setAudioBlob(null);
 
       if (currentIndex + 1 < questions.length) {
-        // Move to next question
         setCurrentIndex(prev => prev + 1);
+        setCode('// Next question code sandbox...\n');
       } else {
-        // 2. All questions answered! Mark screening complete
-        await api.completeScreening(sessionId);
+        await api.completeScreening(sessionId, { tab_switches: tabSwitches, paste_events: pasteEvents });
         navigate('/complete');
       }
     } catch (err) {
-      setError(err.message || 'Failed to upload answer. Please try again.');
+      setError(err.message || 'Failed to submit answer. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -133,98 +156,177 @@ export default function Interview() {
 
   if (questions.length === 0) {
     return (
-      <div className="app-container">
-        <div className="glass-card" style={{ textAlign: 'center' }}>
+      <div className="app-container" style={{ textAlign: 'center' }}>
+        <div className="glass-card" style={{ padding: '4rem 2rem' }}>
+          <div className="spinner" style={{ margin: '0 auto 1rem', width: 32, height: 32 }} />
           <p style={{ color: 'var(--text-muted)' }}>Loading interview questions...</p>
         </div>
       </div>
     );
   }
 
-  const currentQuestion = questions[currentIndex].question;
+  const isLast = currentIndex + 1 >= questions.length;
 
   return (
-    <div className="app-container">
-      <div className="glass-card">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '1rem' }}>
-          <span style={{ fontSize: '0.85rem', color: 'var(--primary)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>AI Screen Q&A</span>
-          <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>
-            Question <strong>{currentIndex + 1}</strong> of {questions.length}
-          </span>
+    <div className="app-container" style={{ maxWidth: isEngineering ? '1200px' : '560px' }}>
+      <div className="progress-steps" style={{ marginBottom: '2rem' }}>
+        {STEPS.map((s, i) => (
+          <div key={s} className="step-item">
+            <div className={`step-dot ${i === 2 ? 'active' : i < 2 ? 'done' : ''}`}>{i < 2 ? '✓' : i + 1}</div>
+            {i < STEPS.length - 1 && <div className={`step-line ${i < 2 ? 'done' : ''}`} />}
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display: 'flex', gap: '2rem', flexWrap: 'wrap' }}>
+        
+        {/* Left Side: Interview Controls */}
+        <div className="glass-card" style={{ flex: '1 1 500px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+            <span style={{ fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', color: 'var(--primary-light)' }}>
+              AI Interview
+            </span>
+            <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)', fontWeight: 500 }}>
+              {currentIndex + 1} / {questions.length}
+            </span>
+          </div>
+
+          <div style={{ height: 3, background: 'rgba(255,255,255,0.06)', borderRadius: 2, marginBottom: '1.75rem', overflow: 'hidden' }}>
+            <div style={{
+              height: '100%',
+              width: `${((currentIndex) / questions.length) * 100}%`,
+              background: 'linear-gradient(90deg, var(--primary), var(--accent))',
+              borderRadius: 2,
+              transition: 'width 0.5s ease'
+            }} />
+          </div>
+
+          <div className="question-card">
+            <div className="question-number">Question {currentIndex + 1}</div>
+            <p className="question-text">{questions[currentIndex]}</p>
+            <button className="speak-btn" onClick={speakQuestion} title="Read question aloud">
+              <Volume2 size={15} />
+            </button>
+          </div>
+
+          {error && (
+            <div className="alert alert-error">
+              <AlertCircle size={16} style={{ flexShrink: 0 }} />
+              {error}
+            </div>
+          )}
+
+          {/* AI Avatar OR Recording UI */}
+          <div className="recording-area" style={{ padding: '1.5rem 0' }}>
+            
+            {isAiSpeaking ? (
+              <div className="ai-avatar-container" style={{ textAlign: 'center', marginBottom: '1rem' }}>
+                <div className="ai-avatar pulse" style={{
+                  width: '100px', height: '100px', margin: '0 auto', borderRadius: '50%',
+                  background: 'radial-gradient(circle, var(--primary-light) 0%, var(--primary) 60%, var(--accent) 100%)',
+                  boxShadow: '0 0 30px var(--primary-glow)',
+                  animation: 'avatarPulse 1s ease-in-out infinite alternate'
+                }}></div>
+                <p style={{ marginTop: '1rem', color: 'var(--primary-light)', fontSize: '0.85rem' }}>AI is speaking...</p>
+              </div>
+            ) : (
+              <>
+                {recording && (
+                  <div className="waveform">
+                    {Array.from({ length: WAVEFORM_BARS }).map((_, i) => (
+                      <div key={i} className="waveform-bar" />
+                    ))}
+                  </div>
+                )}
+
+                {!audioUrl ? (
+                  <>
+                    <button
+                      className={`record-btn ${recording ? 'recording' : 'idle'}`}
+                      onClick={recording ? stopRecording : startRecording}
+                      aria-label={recording ? 'Stop recording' : 'Start recording'}
+                    >
+                      {recording ? <Square size={26} color="#fff" /> : <Mic size={26} color="#fff" />}
+                    </button>
+                    <p className={`record-status ${recording ? 'live' : ''}`}>
+                      {recording ? 'Recording… click to stop' : 'Click mic to answer'}
+                    </p>
+                  </>
+                ) : (
+                  <div className="audio-preview" style={{ width: '100%' }}>
+                    <div className="audio-preview-label"><CheckCircle size={14} /> Answer recorded</div>
+                    <audio src={audioUrl} controls />
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+
+          {/* Actions */}
+          <div style={{ display: 'flex', gap: '0.875rem', marginTop: '0.5rem' }}>
+            {audioUrl && (
+              <button className="btn btn-ghost" onClick={handleReset} disabled={loading} style={{ flexShrink: 0, width: 'auto', padding: '0.9rem 1.25rem' }}>
+                <RotateCcw size={16} /> Redo
+              </button>
+            )}
+            <button
+              className="btn btn-primary"
+              onClick={handleSubmit}
+              disabled={!audioUrl || loading || isAiSpeaking}
+            >
+              {loading
+                ? <><span className="spinner" /> Submitting...</>
+                : isLast
+                ? <>Complete Screening <CheckCircle size={16} /></>
+                : <>Next Question <ChevronRight size={16} /></>
+              }
+            </button>
+          </div>
         </div>
 
-        <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '1rem', padding: '1.75rem', marginBottom: '2.5rem', position: 'relative' }}>
-          <h2 style={{ fontSize: '1.25rem', fontWeight: 600, lineHeight: 1.5, color: '#fff', paddingRight: '2.5rem' }}>
-            {currentQuestion}
-          </h2>
-          <button 
-            onClick={speakQuestion}
-            style={{ position: 'absolute', right: '1.25rem', top: '1.5rem', background: 'rgba(99, 102, 241, 0.1)', border: 'none', width: '36px', height: '36px', borderRadius: '50%', display: 'flex', alignItems: 'center', justify: 'center', cursor: 'pointer', transition: 'all 0.2s' }}
-            title="Read question aloud"
-          >
-            <Volume2 size={16} style={{ color: 'var(--primary)' }} />
-          </button>
-        </div>
-
-        {error && (
-          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', background: 'rgba(239, 68, 68, 0.15)', color: '#fca5a5', padding: '1rem', borderRadius: '0.75rem', marginBottom: '1.5rem', border: '1px solid rgba(239, 68, 68, 0.2)' }}>
-            <AlertCircle size={20} style={{ flexShrink: 0 }} />
-            <span style={{ fontSize: '0.9rem' }}>{error}</span>
+        {/* Right Side: Monaco Code Editor Sandbox (Engineering Only) */}
+        {isEngineering && (
+          <div className="glass-card" style={{ flex: '1 1 500px', display: 'flex', flexDirection: 'column' }}>
+             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
+               <Code size={18} color="var(--primary-light)" />
+               <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-light)' }}>Technical Sandbox</span>
+             </div>
+             <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>
+               You can use this editor to write code while answering. The AI is observing your approach.
+             </p>
+             <div 
+               style={{ flex: 1, minHeight: '400px', borderRadius: '8px', overflow: 'hidden', border: '1px solid var(--border-card)' }}
+               onPasteCapture={(e) => {
+                 const pastedData = e.clipboardData.getData('Text');
+                 if (pastedData && pastedData.length > 20) {
+                   setPasteEvents(prev => prev + 1);
+                 }
+               }}
+             >
+                <Editor
+                  height="100%"
+                  defaultLanguage="javascript"
+                  theme="vs-dark"
+                  value={code}
+                  onChange={(val) => setCode(val)}
+                  options={{
+                    minimap: { enabled: false },
+                    fontSize: 14,
+                    padding: { top: 16 }
+                  }}
+                />
+             </div>
           </div>
         )}
-
-        <div className="recording-container" style={{ margin: '1.5rem 0' }}>
-          {recording && (
-            <div className="waveform">
-              <div className="waveform-bar"></div>
-              <div className="waveform-bar"></div>
-              <div className="waveform-bar"></div>
-              <div className="waveform-bar"></div>
-              <div className="waveform-bar"></div>
-              <div className="waveform-bar"></div>
-              <div className="waveform-bar"></div>
-              <div className="waveform-bar"></div>
-            </div>
-          )}
-
-          {!audioUrl ? (
-            <button 
-              className={`record-btn-glow ${recording ? 'recording' : ''}`}
-              onClick={recording ? stopRecording : startRecording}
-            >
-              {recording ? <Square size={32} color="#fff" /> : <Mic size={32} color="#fff" />}
-            </button>
-          ) : (
-            <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '1rem', alignItems: 'center' }}>
-              <p style={{ color: 'var(--success)', fontSize: '0.9rem', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                <CheckCircle2 size={16} /> Answer recorded successfully
-              </p>
-              <audio src={audioUrl} controls style={{ width: '100%', maxWidth: '300px' }} />
-            </div>
-          )}
-
-          <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>
-            {recording ? 'Recording answer...' : audioUrl ? 'Listen to your response' : 'Click mic to record your response'}
-          </p>
-        </div>
-
-        <div style={{ display: 'flex', gap: '1rem', marginTop: '3rem' }}>
-          {audioUrl && (
-            <button className="btn" onClick={handleReset} style={{ background: 'rgba(255,255,255,0.05)', color: '#fff' }} disabled={loading}>
-              <RotateCcw size={18} /> Record Again
-            </button>
-          )}
-          
-          <button 
-            className="btn btn-primary"
-            onClick={handleSubmitAnswer}
-            disabled={!audioBlob || loading}
-          >
-            {loading ? 'Submitting...' : currentIndex + 1 < questions.length ? 'Next Question' : 'Complete Screening'}
-            <ArrowRight size={18} />
-          </button>
-        </div>
       </div>
+      
+      {/* Dynamic Avatar Animation */}
+      <style dangerouslySetInnerHTML={{__html: `
+        @keyframes avatarPulse {
+          0% { transform: scale(0.95); box-shadow: 0 0 20px rgba(67, 97, 238, 0.4); }
+          100% { transform: scale(1.05); box-shadow: 0 0 50px rgba(67, 97, 238, 0.8); }
+        }
+      `}} />
     </div>
   );
 }

@@ -14,6 +14,7 @@ Variables to fill (Python .format() style):
   {w_ownership}      - Weight for ownership_signals
   {w_curiosity}      - Weight for curiosity_depth
   {w_multilingual}   - Weight for multilingual_fluency
+  {w_eq}             - Weight for eq_score
 """
 
 SYSTEM_PROMPT = """
@@ -22,7 +23,7 @@ Your task is to evaluate a candidate's screening interview transcript for the ro
 
 The required skills for this role are: {required_skills}
 
-You will score the candidate on 6 competency dimensions. Each score is from 0 to 10.
+You will score the candidate on 7 competency dimensions. Each score is from 0 to 10.
 Be calibrated — a 10 is exceptional, a 5 is adequate, a 3 is concerning.
 
 IMPORTANT: Return ONLY valid JSON. No extra text before or after the JSON block.
@@ -70,6 +71,11 @@ Score the candidate on each dimension below (0-10) with a brief justification (1
    - Note: High score even if entire interview is in one language,
      if that language is used fluently and precisely
 
+7. **eq_score** (weight: {w_eq})
+   - Tone and emotional intelligence derived from transcript semantics
+   - Evidence of confidence, enthusiasm, and composure
+   - Empathy and self-awareness in their responses
+
 Also identify any red flags (e.g., inconsistencies, vague answers, overconfidence).
 
 ## Required JSON Response Format
@@ -81,7 +87,8 @@ Also identify any red flags (e.g., inconsistencies, vague answers, overconfidenc
     "shipping_velocity": <float 0-10>,
     "ownership_signals": <float 0-10>,
     "curiosity_depth": <float 0-10>,
-    "multilingual_fluency": <float 0-10>
+    "multilingual_fluency": <float 0-10>,
+    "eq_score": <float 0-10>
   }},
   "justifications": {{
     "technical_depth": "<1-2 sentence justification>",
@@ -89,7 +96,8 @@ Also identify any red flags (e.g., inconsistencies, vague answers, overconfidenc
     "shipping_velocity": "<1-2 sentence justification>",
     "ownership_signals": "<1-2 sentence justification>",
     "curiosity_depth": "<1-2 sentence justification>",
-    "multilingual_fluency": "<1-2 sentence justification>"
+    "multilingual_fluency": "<1-2 sentence justification>",
+    "eq_score": "<1-2 sentence justification>"
   }},
   "flags": ["<flag1>", "<flag2>"],
   "hr_summary": "<2-3 sentence plain English summary for the HR team>"
@@ -122,5 +130,6 @@ def build_scoring_prompt(
         w_ownership=weights.get("ownership_signals", 0.15),
         w_curiosity=weights.get("curiosity_depth", 0.10),
         w_multilingual=weights.get("multilingual_fluency", 0.10),
+        w_eq=weights.get("eq_score", 0.10),
     )
     return system, user

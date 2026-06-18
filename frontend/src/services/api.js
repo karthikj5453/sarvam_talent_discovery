@@ -5,11 +5,12 @@ async function request(endpoint, options = {}) {
   const response = await fetch(url, options);
   if (!response.ok) {
     let errorDetail = 'API error';
+    const text = await response.text();
     try {
-      const data = await response.json();
-      errorDetail = data.detail || errorDetail;
+      const data = JSON.parse(text);
+      errorDetail = data.detail || text;
     } catch (_) {
-      errorDetail = await response.text();
+      errorDetail = text || errorDetail;
     }
     throw new Error(errorDetail);
   }
@@ -23,13 +24,13 @@ export const api = {
   },
 
   // Candidate application
-  async applyJob({ name, email, phone, jobId }) {
+  async applyJob({ name, email, phone, github_url, jobId }) {
     return request('/candidates/public/apply', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ name, email, phone, job_id: jobId }),
+      body: JSON.stringify({ name, email, phone, github_url, job_id: jobId }),
     });
   },
 
@@ -102,9 +103,11 @@ export const api = {
   },
 
   // Complete screening session
-  async completeScreening(sessionId) {
+  async completeScreening(sessionId, proctoringFlags = {}) {
     return request(`/screening/complete?session_id=${sessionId}`, {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(proctoringFlags),
     });
   },
 };

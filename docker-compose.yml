@@ -74,5 +74,19 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # ─── NGINX Web Server (production mode) ────────────────────────
+  nginx:
+    build:
+      context: .
+      dockerfile: nginx/Dockerfile
+    container_name: sarvam_nginx
+    profiles: ["prod"]
+    ports:
+      - "80:80"
+      - "8080:8080"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
 volumes:
   postgres_data:

@@ -11,7 +11,7 @@ from core.database import engine, Base
 from core import models  # noqa
 
 # Import routers
-from api.routes import auth, candidates, jobs, screening, evaluations, dashboard, analytics
+from api.routes import auth, candidates, jobs, screening, evaluations, dashboard, analytics, whatsapp
 
 # Create all tables on startup (best-effort — won't crash if DB is unreachable)
 try:
@@ -55,6 +55,7 @@ app.include_router(screening.router,    prefix="/screening",    tags=["Screening
 app.include_router(evaluations.router,  prefix="/evaluations",  tags=["Evaluations"])
 app.include_router(dashboard.router,    prefix="/dashboard",    tags=["Dashboard"])
 app.include_router(analytics.router,    prefix="/analytics",    tags=["Analytics"])
+app.include_router(whatsapp.router,     prefix="/whatsapp",     tags=["WhatsApp"])
 
 
 # ─── HEALTH CHECK ─────────────────────────────────────────────

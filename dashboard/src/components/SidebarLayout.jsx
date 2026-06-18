@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { api } from '../services/api';
-import { Briefcase, Users, LayoutDashboard, LogOut, User } from 'lucide-react';
+import { Briefcase, Users, LayoutDashboard, LogOut, Zap } from 'lucide-react';
 
 export default function SidebarLayout({ children }) {
   const [hrUser, setHrUser] = useState(null);
@@ -9,88 +9,78 @@ export default function SidebarLayout({ children }) {
   const location = useLocation();
 
   useEffect(() => {
-    async function loadMe() {
-      try {
-        const user = await api.getMe();
-        setHrUser(user);
-      } catch (_) {
-        navigate('/login');
-      }
-    }
-    loadMe();
+    api.getMe()
+      .then(setHrUser)
+      .catch(() => navigate('/login'));
   }, [navigate]);
 
-  const handleLogout = () => {
-    api.logout();
-  };
+  const initials = hrUser?.full_name
+    ? hrUser.full_name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2)
+    : 'HR';
+
+  const NAV_ITEMS = [
+    { to: '/', icon: LayoutDashboard, label: 'Overview', exact: true },
+    { to: '/jobs', icon: Briefcase, label: 'Jobs' },
+    { to: '/candidates', icon: Users, label: 'Candidates' },
+  ];
 
   return (
     <div className="dashboard-layout">
-      <div className="sidebar">
-        <div className="sidebar-title">
-          <span>🎙️</span> Sarvam Discovery
+      <aside className="sidebar">
+        {/* Brand */}
+        <div className="sidebar-brand">
+          <div className="sidebar-brand-icon">
+            <Zap size={17} color="#fff" />
+          </div>
+          <div className="sidebar-brand-text">
+            <span className="sidebar-brand-name">Sarvam</span>
+            <span className="sidebar-brand-sub">Talent Engine</span>
+          </div>
         </div>
 
-        <nav style={{ flexGrow: 1, marginTop: '1rem' }}>
+        {/* Navigation */}
+        <nav style={{ flex: 1 }}>
+          <p className="nav-section-label" style={{ marginBottom: '0.5rem' }}>Navigation</p>
           <ul className="nav-links">
-            <li>
-              <NavLink 
-                to="/" 
-                className={({ isActive }) => `nav-link ${isActive && location.pathname === '/' ? 'active' : ''}`}
-              >
-                <LayoutDashboard size={18} /> Overview
-              </NavLink>
-            </li>
-            <li>
-              <NavLink 
-                to="/jobs" 
-                className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
-              >
-                <Briefcase size={18} /> Jobs
-              </NavLink>
-            </li>
-            <li>
-              <NavLink 
-                to="/candidates" 
-                className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
-              >
-                <Users size={18} /> Candidates
-              </NavLink>
-            </li>
+            {NAV_ITEMS.map(({ to, icon: Icon, label, exact }) => (
+              <li key={to}>
+                <NavLink
+                  to={to}
+                  end={exact}
+                  className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
+                >
+                  <Icon size={16} />
+                  {label}
+                </NavLink>
+              </li>
+            ))}
           </ul>
         </nav>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', borderTop: '1px solid var(--border-muted)', paddingTop: '1.5rem' }}>
+        {/* User section */}
+        <div className="sidebar-user">
           {hrUser && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0 0.5rem' }}>
-              <div style={{ background: 'var(--primary-glow)', width: '32px', height: '32px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <User size={16} style={{ color: 'var(--primary-light)' }} />
-              </div>
-              <div style={{ minWidth: 0, flexGrow: 1 }}>
-                <p style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <div className="sidebar-user-card">
+              <div className="user-avatar">{initials}</div>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <p style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {hrUser.full_name || 'HR Lead'}
                 </p>
-                <p style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {hrUser.email}
                 </p>
               </div>
             </div>
           )}
-          
-          <button 
-            onClick={handleLogout}
-            style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'transparent', border: 'none', color: '#f87171', cursor: 'pointer', padding: '0.75rem 0.5rem', fontSize: '0.9rem', fontWeight: 500, width: '100%', borderRadius: '0.5rem', transition: 'background 0.2s' }}
-            onMouseEnter={(e) => e.target.style.background = 'rgba(239, 68, 68, 0.05)'}
-            onMouseLeave={(e) => e.target.style.background = 'transparent'}
-          >
-            <LogOut size={16} /> Sign Out
+          <button className="sidebar-logout-btn" onClick={() => api.logout()}>
+            <LogOut size={14} /> Sign Out
           </button>
         </div>
-      </div>
+      </aside>
 
-      <div className="main-content">
+      <main className="main-content">
         {children}
-      </div>
+      </main>
     </div>
   );
 }
