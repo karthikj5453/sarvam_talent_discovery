@@ -41,7 +41,13 @@ class Settings(BaseSettings):
     # ─── App ──────────────────────────────────────────────────────
     APP_ENV: str = "development"
     DEBUG: bool = True
-    CORS_ORIGINS: List[str] = ["http://localhost:5173", "http://localhost:5174", "http://localhost:3000"]
+    CORS_ORIGINS: List[str] = [
+        "http://localhost:5173",
+        "http://localhost:5174",
+        "http://localhost:3000",
+        "https://sarvam-talent-discovery.netlify.app",
+        "https://sarvam-talent-discovery-hrdashboard.netlify.app"
+    ]
 
     # ─── SMTP Email Notifications ─────────────────────────────────
     SMTP_HOST: str = ""
