@@ -26,7 +26,7 @@ The AI evaluates them on equal footing.
 | Portal | URL | Credentials |
 |---|---|---|
 | 🎤 **Candidate Portal** | [sarvam-talent-discovery.netlify.app](https://sarvam-talent-discovery.netlify.app) | *(no login required)* |
-| 📊 **HR Dashboard** | [sarvam-talent-discovery-hrdashboard.netlify.app](https://sarvam-talent-discovery-hrdashboard.netlify.app/login) | Email: `hr@company.com` / Password: `password123` |
+| 📊 **HR Dashboard** | [sarvam-talent-discovery-hrdashboard.netlify.app](https://sarvam-talent-discovery-hrdashboard.netlify.app/login) | 
 | ⚙️ **Backend API** | [sarvam-talent-discovery-tla3.onrender.com](https://sarvam-talent-discovery-tla3.onrender.com/docs) | *(Swagger docs)* |
 
 > **Tip:** On the HR Dashboard login page, click **"One-click Demo Login"** to skip typing credentials.
