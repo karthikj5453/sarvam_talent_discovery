@@ -12,6 +12,7 @@
 [![Sarvam AI](https://img.shields.io/badge/Sarvam_AI-Powered-FF6B35?style=for-the-badge)](https://sarvam.ai)
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://docker.com)
 [![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
+[![Live Demo](https://img.shields.io/badge/Live_Demo-Netlify-00C7B7?style=for-the-badge&logo=netlify&logoColor=white)](https://sarvam-talent-discovery.netlify.app)
 
 <br/>
 
@@ -19,6 +20,16 @@
 A Hindi speaker and a Tamil speaker walk into the same job interview.
 The AI evaluates them on equal footing.
 ```
+
+### 🌐 Live Demo
+
+| Portal | URL | Credentials |
+|---|---|---|
+| 🎤 **Candidate Portal** | [sarvam-talent-discovery.netlify.app](https://sarvam-talent-discovery.netlify.app) | *(no login required)* |
+| 📊 **HR Dashboard** | [sarvam-talent-discovery-hrdashboard.netlify.app](https://sarvam-talent-discovery-hrdashboard.netlify.app/login) | Email: `hr@company.com` / Password: `password123` |
+| ⚙️ **Backend API** | [sarvam-talent-discovery-tla3.onrender.com](https://sarvam-talent-discovery-tla3.onrender.com/docs) | *(Swagger docs)* |
+
+> **Tip:** On the HR Dashboard login page, click **"One-click Demo Login"** to skip typing credentials.
 
 </div>
 
@@ -163,9 +174,15 @@ docker compose --profile prod up -d --build
 
 ### 4. Explore the Ecosystem
 
+**Local Development:**
 - **Candidate Portal:** `http://localhost:5173/`
 - **HR Dashboard:** `http://localhost:5174/`
 - **Swagger API Docs:** `http://localhost:8000/docs`
+
+**Live Production:**
+- **Candidate Portal:** https://sarvam-talent-discovery.netlify.app
+- **HR Dashboard:** https://sarvam-talent-discovery-hrdashboard.netlify.app/login
+- **Backend API Docs:** https://sarvam-talent-discovery-tla3.onrender.com/docs
 
 ---
 
