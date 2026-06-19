@@ -83,7 +83,7 @@ async def transcribe_and_translate(
     audio_bytes: bytes,
     filename: str = "audio.wav",
     prompt: Optional[str] = None,
-    model: str = "saaras:v2",
+    model: str = "saaras:v2.5",
 ) -> dict:
     """
     Transcribe audio AND translate to English in one call.
