@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../services/api';
-import { Briefcase, MapPin, Layers, ListChecks, Plus, X, AlertCircle } from 'lucide-react';
+import { Briefcase, MapPin, Layers, ListChecks, Plus, X, AlertCircle, Trash2 } from 'lucide-react';
 
 const DEFAULT_WEIGHTS = {
   technical_depth: 0.25,
@@ -16,6 +16,8 @@ export default function Jobs() {
   const [showModal, setShowModal] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
+  const [deleteError, setDeleteError] = useState(null);
 
   // Form State
   const [title, setTitle] = useState('');
@@ -39,6 +41,20 @@ export default function Jobs() {
   useEffect(() => {
     loadJobs();
   }, []);
+
+  const handleDelete = async (jobId, jobTitle) => {
+    if (!window.confirm(`Archive "${jobTitle}"? It will be hidden from candidates.`)) return;
+    setDeletingId(jobId);
+    setDeleteError(null);
+    try {
+      await api.deleteJob(jobId);
+      loadJobs();
+    } catch (err) {
+      setDeleteError(err.message || 'Failed to archive job.');
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   const handleWeightChange = (key, val) => {
     setWeights((prev) => ({
@@ -118,6 +134,7 @@ export default function Jobs() {
               <th>Location</th>
               <th>Required Skills</th>
               <th>Status</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -146,16 +163,36 @@ export default function Jobs() {
                     {job.is_active ? 'Active' : 'Inactive'}
                   </span>
                 </td>
+                <td>
+                  <button
+                    className="btn btn-ghost"
+                    style={{ padding: '0.35rem 0.6rem', color: 'var(--danger)', border: '1px solid rgba(239,68,68,0.25)' }}
+                    onClick={() => handleDelete(job.id, job.title)}
+                    disabled={deletingId === job.id}
+                    title="Archive job"
+                  >
+                    {deletingId === job.id
+                      ? <span className="spinner" style={{ width: 14, height: 14 }} />
+                      : <Trash2 size={14} />}
+                  </button>
+                </td>
               </tr>
             ))}
             {jobs.length === 0 && (
               <tr>
-                <td colSpan="5">
+                <td colSpan="6">
                   <div className="empty-state">
                     <div className="empty-state-icon"><Briefcase size={22} /></div>
                     <p style={{ fontWeight: 600, color: 'var(--text-secondary)', fontSize: '0.9rem' }}>No job profiles yet</p>
                     <p style={{ fontSize: '0.82rem' }}>Click "New Job Profile" to create the first one.</p>
                   </div>
+                </td>
+              </tr>
+            )}
+            {deleteError && (
+              <tr>
+                <td colSpan="6" style={{ color: 'var(--danger)', fontSize: '0.82rem', textAlign: 'center' }}>
+                  {deleteError}
                 </td>
               </tr>
             )}

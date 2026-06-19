@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Query
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Query, Request
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from uuid import UUID
@@ -11,6 +11,7 @@ from core.schemas import (
 )
 from api.routes.auth import get_current_user
 from core.models import User
+from services import email_service
 
 router = APIRouter()
 
@@ -122,6 +123,21 @@ def update_candidate_status(
     candidate.status = payload.status
     db.commit()
     db.refresh(candidate)
+
+    # Send status update email to candidate
+    try:
+        notify_statuses = {"shortlisted", "offered", "rejected", "interviewing"}
+        if payload.status in notify_statuses:
+            job = db.query(Job).filter(Job.id == candidate.job_id).first()
+            email_service.send_status_update(
+                candidate_name=candidate.name,
+                candidate_email=candidate.email,
+                job_title=job.title if job else "the position",
+                new_status=payload.status,
+            )
+    except Exception as e:
+        pass  # Never fail status update because of email
+
     return candidate
 
 
@@ -129,7 +145,7 @@ def update_candidate_status(
 # No auth required — candidates call this from the public portal
 
 @router.post("/public/apply", response_model=CandidateResponse, status_code=status.HTTP_201_CREATED)
-def public_apply(payload: CandidateCreate, db: Session = Depends(get_db)):
+def public_apply(request: Request, payload: CandidateCreate, db: Session = Depends(get_db)):
     """Public endpoint: candidate applies directly from the job portal (no HR auth needed)."""
     job = db.query(Job).filter(Job.id == payload.job_id, Job.is_active == True).first()
     if not job:

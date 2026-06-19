@@ -1,9 +1,13 @@
 import os
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 from config import settings
 from core.database import engine, Base
 
@@ -19,11 +23,17 @@ try:
 except Exception as e:
     print(f"[WARNING] DB not ready yet, skipping create_all: {e}")
 
+# ─── RATE LIMITER ─────────────────────────────────────────────
+limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
+
 app = FastAPI(
     title="Sarvam Talent Discovery Engine",
     description="Multilingual AI-powered hiring platform",
     version="1.0.0",
 )
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # ─── CORS ─────────────────────────────────────────────────────
 app.add_middleware(

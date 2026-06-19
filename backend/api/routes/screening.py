@@ -15,6 +15,7 @@ from core.schemas import (
 )
 from services.sarvam.sarvam_client import transcribe_and_translate, SarvamError
 from services.storage.s3_client import upload_audio, upload_resume as s3_upload_resume, key_to_url
+from services import email_service
 from config import settings
 
 logger = logging.getLogger(__name__)
@@ -49,6 +50,19 @@ def start_screening(payload: ScreeningStartRequest, db: Session = Depends(get_db
     db.add(session)
     db.commit()
     db.refresh(session)
+
+    # ── Send application confirmation email to candidate ──────
+    try:
+        job = db.query(Job).filter(Job.id == candidate.job_id).first()
+        job_title = job.title if job else "the position"
+        email_service.send_application_received(
+            candidate_name=candidate.name,
+            candidate_email=candidate.email,
+            job_title=job_title,
+        )
+    except Exception as e:
+        logger.warning(f"[Email] Application received email failed: {e}")
+
     return session
 
 
@@ -325,4 +339,41 @@ async def complete_screening(
 
     # Refresh session after evaluation may have updated candidate status
     db.refresh(session)
+
+    # ── Send completion emails ─────────────────────────────────
+    try:
+        candidate = db.query(Candidate).filter(Candidate.id == session.candidate_id).first()
+        job = db.query(Job).filter(Job.id == candidate.job_id).first() if candidate else None
+        from core.models import CompetencyScore
+        score = (
+            db.query(CompetencyScore)
+            .filter(CompetencyScore.candidate_id == session.candidate_id)
+            .order_by(CompetencyScore.created_at.desc())
+            .first()
+        )
+        total_score = score.total_score if score else None
+        job_title = job.title if job else "the position"
+        dashboard_url = f"https://sarvam-talent-discovery-hrdashboard.netlify.app/candidates/{candidate.id}" if candidate else ""
+
+        if candidate:
+            email_service.send_screening_complete(
+                candidate_name=candidate.name,
+                candidate_email=candidate.email,
+                job_title=job_title,
+                total_score=total_score,
+            )
+        # Notify all HR users
+        from core.models import User
+        hr_users = db.query(User).filter(User.is_active == True).all()
+        for hr_user in hr_users:
+            email_service.send_hr_new_candidate_alert(
+                hr_email=hr_user.email,
+                candidate_name=candidate.name if candidate else "Unknown",
+                job_title=job_title,
+                total_score=total_score,
+                dashboard_url=dashboard_url,
+            )
+    except Exception as e:
+        logger.warning(f"[Email] Post-screening emails failed: {e}")
+
     return session

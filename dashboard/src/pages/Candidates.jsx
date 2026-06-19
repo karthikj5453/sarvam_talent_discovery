@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../services/api';
-import { Search, Filter, User, Calendar, Award, Globe, ArrowRight } from 'lucide-react';
+import { Search, Filter, User, Calendar, Award, Globe, ArrowRight, ChevronLeft, ChevronRight, Clock, CheckCircle2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
+
+const PAGE_SIZE = 15;
 
 export default function Candidates() {
   const [candidatesWithScores, setCandidatesWithScores] = useState([]);
@@ -9,6 +11,7 @@ export default function Candidates() {
   const [selectedJobId, setSelectedJobId] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
 
   const loadData = async () => {
     try {
@@ -44,6 +47,22 @@ export default function Candidates() {
     return matchesJob && matchesSearch;
   });
 
+  // Pagination
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const paginated = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+
+  // Reset to page 1 on filter change
+  const handleSearch = (val) => { setSearchTerm(val); setPage(1); };
+  const handleJobFilter = (val) => { setSelectedJobId(val); setPage(1); };
+
+  // Evaluation status helper
+  const evalStatus = (candidate, score) => {
+    if (score?.total_score != null) return 'evaluated';
+    if (candidate.status === 'screened') return 'pending';
+    return 'unscreened';
+  };
+
   if (loading) {
     return (
       <div>
@@ -63,7 +82,7 @@ export default function Candidates() {
       </div>
 
       {/* Filter and Search Bar Layout */}
-      <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginBottom: '2rem' }}>
+      <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginBottom: '2rem', alignItems: 'center' }}>
         <div style={{ position: 'relative', flexGrow: 1, minWidth: '240px' }}>
           <Search size={16} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
           <input
@@ -72,16 +91,16 @@ export default function Candidates() {
             style={{ paddingLeft: '2.5rem' }}
             placeholder="Search candidates by name or email..."
             value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            onChange={(e) => handleSearch(e.target.value)}
           />
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: '220px' }}>
           <Filter size={16} style={{ color: 'var(--text-muted)' }} />
-          <select 
+          <select
             className="form-input"
-            value={selectedJobId} 
-            onChange={(e) => setSelectedJobId(e.target.value)}
+            value={selectedJobId}
+            onChange={(e) => handleJobFilter(e.target.value)}
           >
             <option value="">All Job Profiles</option>
             {jobs.map((job) => (
@@ -91,9 +110,14 @@ export default function Candidates() {
             ))}
           </select>
         </div>
+
+        {/* Total count */}
+        <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+          {filtered.length} candidate{filtered.length !== 1 ? 's' : ''}
+        </span>
       </div>
 
-      {/* Candidates List */}
+      {/* Candidates Table */}
       <div className="table-container">
         <table>
           <thead>
@@ -101,6 +125,7 @@ export default function Candidates() {
               <th>Applicant Name</th>
               <th>Applied Role</th>
               <th>Overall Score</th>
+              <th>Eval Status</th>
               <th>Primary Language</th>
               <th>Applied Date</th>
               <th>Status</th>
@@ -108,8 +133,9 @@ export default function Candidates() {
             </tr>
           </thead>
           <tbody>
-            {filtered.map(({ candidate: cand, score }) => {
+            {paginated.map(({ candidate: cand, score }) => {
               const totalScore = score?.total_score;
+              const ev = evalStatus(cand, score);
               return (
                 <tr key={cand.id}>
                   <td style={{ fontWeight: 600, color: '#fff' }}>
@@ -125,7 +151,23 @@ export default function Candidates() {
                         <Award size={14} /> {totalScore.toFixed(1)}
                       </span>
                     ) : (
-                      <span style={{ color: 'var(--text-muted)' }}>Unscreened</span>
+                      <span style={{ color: 'var(--text-muted)' }}>—</span>
+                    )}
+                  </td>
+                  {/* Feature 4: Evaluation Status Indicator */}
+                  <td>
+                    {ev === 'evaluated' && (
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.78rem', color: '#34d399', fontWeight: 600 }}>
+                        <CheckCircle2 size={13} /> Scored
+                      </span>
+                    )}
+                    {ev === 'pending' && (
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.78rem', color: '#fbbf24', fontWeight: 600 }}>
+                        <Clock size={13} /> Evaluating…
+                      </span>
+                    )}
+                    {ev === 'unscreened' && (
+                      <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Not screened</span>
                     )}
                   </td>
                   <td>
@@ -159,7 +201,7 @@ export default function Candidates() {
             })}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan="7" style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
+                <td colSpan="8" style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
                   No candidates matching the filters.
                 </td>
               </tr>
@@ -167,6 +209,44 @@ export default function Candidates() {
           </tbody>
         </table>
       </div>
+
+      {/* Feature 3: Pagination Controls */}
+      {totalPages > 1 && (
+        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.75rem', marginTop: '1.5rem' }}>
+          <button
+            className="btn btn-ghost"
+            style={{ padding: '0.5rem 0.9rem' }}
+            onClick={() => setPage(p => Math.max(1, p - 1))}
+            disabled={currentPage === 1}
+          >
+            <ChevronLeft size={16} />
+          </button>
+
+          {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
+            <button
+              key={p}
+              className={`btn ${p === currentPage ? 'btn-primary' : 'btn-ghost'}`}
+              style={{ padding: '0.5rem 0.85rem', minWidth: 38 }}
+              onClick={() => setPage(p)}
+            >
+              {p}
+            </button>
+          ))}
+
+          <button
+            className="btn btn-ghost"
+            style={{ padding: '0.5rem 0.9rem' }}
+            onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+            disabled={currentPage === totalPages}
+          >
+            <ChevronRight size={16} />
+          </button>
+
+          <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+            Page {currentPage} of {totalPages}
+          </span>
+        </div>
+      )}
     </div>
   );
 }
