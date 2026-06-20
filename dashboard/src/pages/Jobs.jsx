@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../services/api';
+import { useAuth } from '../context/AuthContext';
 import { Briefcase, MapPin, Layers, ListChecks, Plus, X, AlertCircle, Trash2 } from 'lucide-react';
 
 const DEFAULT_WEIGHTS = {
@@ -12,6 +13,7 @@ const DEFAULT_WEIGHTS = {
 };
 
 export default function Jobs() {
+  const { isHrOrAdmin } = useAuth();
   const [jobs, setJobs] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -119,9 +121,11 @@ export default function Jobs() {
           <h1 className="page-title">Job Profiles</h1>
           <p className="page-subtitle">Manage role configurations and competency weightings for AI evaluations.</p>
         </div>
-        <button className="btn btn-primary" onClick={() => setShowModal(true)}>
-          <Plus size={16} /> New Job Profile
-        </button>
+        {isHrOrAdmin && (
+          <button className="btn btn-primary" onClick={() => setShowModal(true)}>
+            <Plus size={16} /> New Job Profile
+          </button>
+        )}
       </div>
 
       {/* Jobs Table */}
@@ -164,17 +168,19 @@ export default function Jobs() {
                   </span>
                 </td>
                 <td>
-                  <button
-                    className="btn btn-ghost"
-                    style={{ padding: '0.35rem 0.6rem', color: 'var(--danger)', border: '1px solid rgba(239,68,68,0.25)' }}
-                    onClick={() => handleDelete(job.id, job.title)}
-                    disabled={deletingId === job.id}
-                    title="Archive job"
-                  >
-                    {deletingId === job.id
-                      ? <span className="spinner" style={{ width: 14, height: 14 }} />
-                      : <Trash2 size={14} />}
-                  </button>
+                  {isHrOrAdmin && (
+                    <button
+                      className="btn btn-ghost"
+                      style={{ padding: '0.35rem 0.6rem', color: 'var(--danger)', border: '1px solid rgba(239,68,68,0.25)' }}
+                      onClick={() => handleDelete(job.id, job.title)}
+                      disabled={deletingId === job.id}
+                      title="Archive job"
+                    >
+                      {deletingId === job.id
+                        ? <span className="spinner" style={{ width: 14, height: 14 }} />
+                        : <Trash2 size={14} />}
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}

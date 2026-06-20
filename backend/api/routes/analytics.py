@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request, HTTPException
+from api.limiter import limiter
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import List, Optional
@@ -17,15 +18,25 @@ PIPELINE_STAGES = ["applied", "screened", "shortlisted", "interviewing", "offere
 
 # ─── RECORD AN EVENT ──────────────────────────────────────────
 
+VALID_EVENT_TYPES = {
+    "application_submitted", "screening_started", "intro_uploaded",
+    "answer_uploaded", "screening_completed", "resume_uploaded",
+    "page_view", "drop_off",
+}
+
+
 @router.post("/event", status_code=201)
+@limiter.limit("30/minute")
 def record_event(
+    request: Request,
     payload: AnalyticsEventCreate,
     db: Session = Depends(get_db),
 ):
-    """
-    Record an analytics event (public — called from candidate portal or backend).
-    Examples: screening_started, resume_uploaded, session_completed, etc.
-    """
+    """Record an analytics event. Rate-limited public endpoint."""
+    if payload.event_type not in VALID_EVENT_TYPES:
+        raise HTTPException(status_code=400, detail=f"Invalid event_type. Must be one of: {sorted(VALID_EVENT_TYPES)}")
+    if payload.event_metadata and len(str(payload.event_metadata)) > 5000:
+        raise HTTPException(status_code=400, detail="event_metadata too large")
     event = AnalyticsEvent(
         event_type=payload.event_type,
         candidate_id=payload.candidate_id,

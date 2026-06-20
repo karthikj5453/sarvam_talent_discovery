@@ -1,6 +1,15 @@
 const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
-async function request(endpoint, options = {}) {
+function parseErrorDetail(detail) {
+  if (!detail) return 'API error';
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    return detail.map(d => d.msg || d.message || JSON.stringify(d)).join(', ');
+  }
+  return String(detail);
+}
+
+async function request(endpoint, options = {}, isRetry = false) {
   const token = localStorage.getItem('hr_token');
   const headers = {
     ...options.headers,
@@ -11,9 +20,30 @@ async function request(endpoint, options = {}) {
   }
 
   const url = `${BASE_URL}${endpoint}`;
-  const response = await fetch(url, { ...options, headers });
+  const response = await fetch(url, {
+    ...options,
+    headers,
+    // Include cookies for the refresh endpoint (HTTP-only cookie is sent automatically)
+    credentials: 'include',
+  });
 
   if (response.status === 401) {
+    if (!isRetry) {
+      // Attempt silent token refresh using the HTTP-only cookie
+      try {
+        const refreshRes = await fetch(`${BASE_URL}/auth/refresh`, {
+          method: 'POST',
+          credentials: 'include',  // Sends the HTTP-only hr_refresh_token cookie
+        });
+        if (refreshRes.ok) {
+          const data = await refreshRes.json();
+          localStorage.setItem('hr_token', data.access_token);
+          return request(endpoint, options, true);
+        }
+      } catch (err) {
+        console.error('Token refresh failed', err);
+      }
+    }
     localStorage.removeItem('hr_token');
     if (window.location.pathname !== '/login') {
       window.location.href = '/login';
@@ -26,7 +56,7 @@ async function request(endpoint, options = {}) {
     const text = await response.text();
     try {
       const data = JSON.parse(text);
-      errorDetail = data.detail || text;
+      errorDetail = parseErrorDetail(data.detail) || text;
     } catch (_) {
       errorDetail = text || errorDetail;
     }
@@ -45,21 +75,39 @@ export const api = {
     formData.append('username', email); // OAuth2 password flow uses 'username'
     formData.append('password', password);
 
-    const data = await request('/auth/login', {
+    const data = await fetch(`${BASE_URL}/auth/login`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
       },
       body: formData,
+      credentials: 'include',  // Ensures the Set-Cookie for refresh token is accepted
     });
 
-    if (data.access_token) {
-      localStorage.setItem('hr_token', data.access_token);
+    if (!data.ok) {
+      const err = await data.json().catch(() => ({ detail: 'Login failed' }));
+      throw new Error(err.detail ? parseErrorDetail(err.detail) : 'Login failed');
     }
-    return data;
+
+    const json = await data.json();
+    if (json.access_token) {
+      localStorage.setItem('hr_token', json.access_token);
+      // Note: refresh_token is now stored as HTTP-only cookie by the backend
+      // No need to save it in localStorage
+    }
+    return json;
   },
 
-  logout() {
+  async logout() {
+    try {
+      // Ask backend to clear the HTTP-only refresh cookie
+      await fetch(`${BASE_URL}/auth/logout`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+    } catch (_) {
+      // Silently fail — we always clear local state
+    }
     localStorage.removeItem('hr_token');
     window.location.href = '/login';
   },
@@ -147,12 +195,14 @@ export const api = {
     return request(`/dashboard/pipeline${query}`);
   },
 
-  async getDashboardCandidates(jobId = null, status = null) {
+  async getDashboardCandidates(jobId = null, status = null, search = null, skip = 0, limit = 50) {
     const params = new URLSearchParams();
     if (jobId) params.append('job_id', jobId);
     if (status) params.append('status', status);
-    const query = params.toString() ? `?${params.toString()}` : '';
-    return request(`/dashboard/candidates${query}`);
+    if (search) params.append('search', search);
+    params.append('skip', skip);
+    params.append('limit', limit);
+    return request(`/dashboard/candidates?${params.toString()}`);
   },
 
   async getTopCandidates(jobId, limit = 10) {
@@ -184,5 +234,25 @@ export const api = {
   // ─── Screening Session (read-only for HR) ─────────────────
   async getScreeningSession(sessionId) {
     return request(`/screening/${sessionId}`);
+  },
+
+  async getCandidateSessions(candidateId) {
+    return request(`/candidates/${candidateId}/sessions`);
+  },
+
+  async getNotes(candidateId) {
+    return request(`/notes/candidates/${candidateId}/notes`);
+  },
+
+  async addNote(candidateId, content, isPinned = false) {
+    return request(`/notes/candidates/${candidateId}/notes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content, is_pinned: isPinned }),
+    });
+  },
+
+  async getTimeline(candidateId) {
+    return request(`/notes/candidates/${candidateId}/timeline`);
   },
 };

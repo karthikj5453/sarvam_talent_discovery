@@ -10,15 +10,15 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
+from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 import secure
 
 from config import settings
+from api.limiter import limiter
 from core.database import engine, Base
 from core import models  # noqa — registers all models with SQLAlchemy
-from api.routes import auth, candidates, jobs, screening, evaluations, dashboard, analytics, whatsapp
+from api.routes import auth, candidates, jobs, screening, evaluations, dashboard, analytics, whatsapp, notes
 
 # Thread-local/Task-local ContextVar for correlation tracking
 request_id_var = contextvars.ContextVar("request_id", default="")
@@ -71,7 +71,7 @@ if settings.APP_ENV != "production":
         logger.warning(f"DB not ready yet, skipping create_all: {e}")
 
 # ─── RATE LIMITER ─────────────────────────────────────────────
-limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
+# Shared instance — route decorators must import from api.limiter
 
 # ─── SECURITY HEADERS ─────────────────────────────────────────
 secure_headers = secure.Secure(
@@ -160,6 +160,7 @@ app.include_router(evaluations.router,  prefix="/evaluations",  tags=["Evaluatio
 app.include_router(dashboard.router,    prefix="/dashboard",    tags=["Dashboard"])
 app.include_router(analytics.router,    prefix="/analytics",    tags=["Analytics"])
 app.include_router(whatsapp.router,     prefix="/whatsapp",     tags=["WhatsApp"])
+app.include_router(notes.router,        prefix="/notes",        tags=["Notes"])
 
 
 # ─── HEALTH CHECK ─────────────────────────────────────────────

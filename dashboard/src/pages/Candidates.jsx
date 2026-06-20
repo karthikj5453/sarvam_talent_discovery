@@ -7,22 +7,35 @@ const PAGE_SIZE = 15;
 
 export default function Candidates() {
   const [candidatesWithScores, setCandidatesWithScores] = useState([]);
+  const [totalCount, setTotalCount] = useState(0);
   const [jobs, setJobs] = useState([]);
   const [selectedJobId, setSelectedJobId] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
   const [page, setPage] = useState(1);
 
+  const [sortBy, setSortBy] = useState('date_desc');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [hrUser, setHrUser] = useState(null);
+
   const loadData = async () => {
+    setLoading(true);
+    setLoadError(null);
     try {
-      const [candList, jobList] = await Promise.all([
-        api.getDashboardCandidates(),   // returns [{candidate, score}]
-        api.getJobs()
+      const skip = (page - 1) * PAGE_SIZE;
+      const statusParam = statusFilter !== 'all' ? statusFilter : null;
+      const [candResult, jobList, user] = await Promise.all([
+        api.getDashboardCandidates(selectedJobId || null, statusParam, searchTerm || null, skip, PAGE_SIZE),
+        jobs.length ? Promise.resolve(jobs) : api.getJobs(),
+        api.getMe().catch(() => null),
       ]);
-      setCandidatesWithScores(candList);
-      setJobs(jobList);
+      setCandidatesWithScores(candResult.items || []);
+      setTotalCount(candResult.total || 0);
+      if (!jobs.length) setJobs(jobList);
+      setHrUser(user);
     } catch (err) {
-      console.error('Failed to load candidate metrics:', err);
+      setLoadError(err.message || 'Failed to load candidates.');
     } finally {
       setLoading(false);
     }
@@ -40,27 +53,36 @@ export default function Candidates() {
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [page, selectedJobId, statusFilter]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setPage(1);
+      loadData();
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
 
   const getJobTitle = (jobId) => {
     const job = jobs.find(j => j.id === jobId);
     return job ? job.title : 'Software Engineer';
   };
 
-  // Filter candidates
-  const filtered = candidatesWithScores.filter(({ candidate }) => {
-    const matchesJob = selectedJobId ? candidate.job_id === selectedJobId : true;
-    const matchesSearch = searchTerm
-      ? (candidate.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-        candidate.email.toLowerCase().includes(searchTerm.toLowerCase())
-      : true;
-    return matchesJob && matchesSearch;
-  });
+  const filteredAndSorted = React.useMemo(() => {
+    let result = [...candidatesWithScores];
+    result.sort((a, b) => {
+      if (sortBy === 'date_desc') return new Date(b.candidate.created_at) - new Date(a.candidate.created_at);
+      if (sortBy === 'date_asc') return new Date(a.candidate.created_at) - new Date(b.candidate.created_at);
+      if (sortBy === 'score_desc') return (b.score?.total_score || -1) - (a.score?.total_score || -1);
+      if (sortBy === 'score_asc') return (a.score?.total_score || -1) - (b.score?.total_score || -1);
+      return 0;
+    });
+    return result;
+  }, [candidatesWithScores, sortBy]);
 
-  // Pagination
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
-  const paginated = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  const paginated = filteredAndSorted;
 
   // Reset to page 1 on filter change
   const handleSearch = (val) => { setSearchTerm(val); setPage(1); };
@@ -105,8 +127,24 @@ export default function Candidates() {
           />
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: '220px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: '150px' }}>
           <Filter size={16} style={{ color: 'var(--text-muted)' }} />
+          <select
+            className="form-input"
+            value={statusFilter}
+            onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
+          >
+            <option value="all">All Status</option>
+            <option value="applied">Applied</option>
+            <option value="screened">Screened</option>
+            <option value="shortlisted">Shortlisted</option>
+            <option value="interviewing">Interviewing</option>
+            <option value="offered">Offered</option>
+            <option value="rejected">Rejected</option>
+          </select>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: '200px' }}>
           <select
             className="form-input"
             value={selectedJobId}
@@ -121,14 +159,31 @@ export default function Candidates() {
           </select>
         </div>
 
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: '160px' }}>
+          <select
+            className="form-input"
+            value={sortBy}
+            onChange={(e) => { setSortBy(e.target.value); setPage(1); }}
+          >
+            <option value="date_desc">Sort: Newest First</option>
+            <option value="date_asc">Sort: Oldest First</option>
+            <option value="score_desc">Sort: Highest Score</option>
+            <option value="score_asc">Sort: Lowest Score</option>
+          </select>
+        </div>
+
         {/* Total count */}
         <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
-          {filtered.length} candidate{filtered.length !== 1 ? 's' : ''}
+          {totalCount} candidate{totalCount !== 1 ? 's' : ''}
         </span>
       </div>
 
-      {/* Candidates Table */}
-      <div className="table-container">
+      {loadError && (
+        <div className="alert alert-error" style={{ marginBottom: '1rem' }}>{loadError}</div>
+      )}
+
+      {/* Desktop table */}
+      <div className="table-container candidates-table-desktop">
         <table>
           <thead>
             <tr>
@@ -201,23 +256,27 @@ export default function Candidates() {
                       {cand.status}
                     </span>
                   </td>
-                  <td style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                    <Link to={`/candidates/${cand.id}`} className="btn btn-secondary" style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem', width: 'auto' }}>
-                      Details <ArrowRight size={12} />
-                    </Link>
-                    <button
-                      className="btn btn-secondary"
-                      style={{ padding: '0.4rem', color: 'var(--error)', borderColor: 'rgba(239, 71, 111, 0.2)', width: 'auto', display: 'inline-flex' }}
-                      onClick={() => handleDeleteCandidate(cand.id)}
-                      title="Delete Candidate Profile"
-                    >
-                      <Trash2 size={14} />
-                    </button>
+                  <td>
+                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                      <Link to={`/candidates/${cand.id}`} className="btn btn-secondary" style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem', width: 'auto' }}>
+                        Details <ArrowRight size={12} />
+                      </Link>
+                      {hrUser && hrUser.role !== 'interviewer' && (
+                        <button
+                          className="btn btn-secondary"
+                          style={{ padding: '0.4rem', color: 'var(--error)', borderColor: 'rgba(239, 71, 111, 0.2)', width: 'auto', display: 'inline-flex' }}
+                          onClick={() => handleDeleteCandidate(cand.id)}
+                          title="Delete Candidate Profile"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               );
             })}
-            {filtered.length === 0 && (
+            {paginated.length === 0 && (
               <tr>
                 <td colSpan="8" style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
                   No candidates matching the filters.
@@ -226,6 +285,31 @@ export default function Candidates() {
             )}
           </tbody>
         </table>
+      </div>
+
+      {/* Mobile cards */}
+      <div className="candidates-cards-mobile">
+        {paginated.map(({ candidate: cand, score }) => {
+          const totalScore = score?.total_score;
+          return (
+            <div key={cand.id} className="candidate-card-mobile dashboard-card">
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                <strong style={{ color: '#fff' }}>{cand.name}</strong>
+                <span className={`badge badge-${cand.status === 'shortlisted' ? 'success' : 'primary'}`}>{cand.status}</span>
+              </div>
+              <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>{cand.email}</p>
+              <p style={{ fontSize: '0.85rem', marginBottom: '0.75rem' }}>{getJobTitle(cand.job_id)}</p>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontWeight: 700, color: totalScore >= 6 ? '#34d399' : '#a5b4fc' }}>
+                  {totalScore != null ? `${totalScore.toFixed(1)}/10` : '—'}
+                </span>
+                <Link to={`/candidates/${cand.id}`} className="btn btn-secondary" style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem', width: 'auto' }}>
+                  Details <ArrowRight size={12} />
+                </Link>
+              </div>
+            </div>
+          );
+        })}
       </div>
 
       {/* Feature 3: Pagination Controls */}
@@ -240,16 +324,24 @@ export default function Candidates() {
             <ChevronLeft size={16} />
           </button>
 
-          {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
-            <button
-              key={p}
-              className={`btn ${p === currentPage ? 'btn-primary' : 'btn-ghost'}`}
-              style={{ padding: '0.5rem 0.85rem', minWidth: 38 }}
-              onClick={() => setPage(p)}
-            >
-              {p}
-            </button>
-          ))}
+          {(() => {
+            const pages = [];
+            const maxButtons = 7;
+            let start = Math.max(1, currentPage - Math.floor(maxButtons / 2));
+            let end = Math.min(totalPages, start + maxButtons - 1);
+            start = Math.max(1, end - maxButtons + 1);
+            for (let p = start; p <= end; p++) pages.push(p);
+            return pages.map(p => (
+              <button
+                key={p}
+                className={`btn ${p === currentPage ? 'btn-primary' : 'btn-ghost'}`}
+                style={{ padding: '0.5rem 0.85rem', minWidth: 38 }}
+                onClick={() => setPage(p)}
+              >
+                {p}
+              </button>
+            ));
+          })()}
 
           <button
             className="btn btn-ghost"

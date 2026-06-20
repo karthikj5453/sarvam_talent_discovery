@@ -1,19 +1,34 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { api } from '../services/api';
+import { useAuth } from '../context/AuthContext';
 import { ArrowLeft, User, Mail, Phone, Calendar, Globe, FileText, CheckCircle, XCircle, Play, AlertTriangle, Download, Trash2 } from 'lucide-react';
 import { Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer } from 'recharts';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 
+const PIPELINE_STAGES = [
+  { key: 'applied', label: 'Applied' },
+  { key: 'screened', label: 'Screened' },
+  { key: 'shortlisted', label: 'Shortlisted' },
+  { key: 'interviewing', label: 'Interviewing' },
+  { key: 'offered', label: 'Offered' },
+  { key: 'rejected', label: 'Rejected' },
+];
+
 export default function CandidateDetails() {
   const { candidateId } = useParams();
+  const { isHrOrAdmin } = useAuth();
   const [candidate, setCandidate] = useState(null);
   const [evaluation, setEvaluation] = useState(null);
   const [session, setSession] = useState(null);
+  const [notes, setNotes] = useState([]);
+  const [timeline, setTimeline] = useState([]);
+  const [newNote, setNewNote] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [statusLoading, setStatusLoading] = useState(false);
+  const [statusMessage, setStatusMessage] = useState(null);
   const [pdfGenerating, setPdfGenerating] = useState(false);
   const navigate = useNavigate();
 
@@ -25,12 +40,23 @@ export default function CandidateDetails() {
       setCandidate(candWithScore.candidate);
       setEvaluation(candWithScore.score || null);
 
-      if (candWithScore.score?.session_id) {
+      const sessions = await api.getCandidateSessions(candidateId).catch(() => []);
+      const latestSession = sessions?.[0];
+      if (latestSession) {
+        setSession(latestSession);
+      } else if (candWithScore.score?.session_id) {
         try {
           const sessData = await api.getScreeningSession(candWithScore.score.session_id);
           setSession(sessData);
-        } catch (_) { }
+        } catch (_) { /* optional */ }
       }
+
+      const [notesData, timelineData] = await Promise.all([
+        api.getNotes(candidateId).catch(() => []),
+        api.getTimeline(candidateId).catch(() => []),
+      ]);
+      setNotes(notesData);
+      setTimeline(timelineData);
     } catch (err) {
       setError('Failed to load candidate profile.');
     } finally {
@@ -43,14 +69,30 @@ export default function CandidateDetails() {
   }, [candidateId]);
 
   const handleStatusChange = async (newStatus) => {
+    if (!isHrOrAdmin) return;
     setStatusLoading(true);
+    setStatusMessage(null);
     try {
       await api.updateCandidateStatus(candidateId, newStatus);
+      setStatusMessage(`Status updated to ${newStatus}.`);
       await loadData();
     } catch (err) {
-      console.error(err);
+      setStatusMessage(err.message || 'Failed to update status.');
     } finally {
       setStatusLoading(false);
+    }
+  };
+
+  const handleAddNote = async (e) => {
+    e.preventDefault();
+    if (!newNote.trim()) return;
+    try {
+      await api.addNote(candidateId, newNote.trim());
+      setNewNote('');
+      const notesData = await api.getNotes(candidateId);
+      setNotes(notesData);
+    } catch (err) {
+      setStatusMessage(err.message || 'Failed to add note.');
     }
   };
 
@@ -85,7 +127,7 @@ export default function CandidateDetails() {
       pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
       pdf.save(`${candidate.name.replace(/\s+/g, '_')}_Dossier.pdf`);
     } catch (e) {
-      console.error("PDF generation failed:", e);
+      setStatusMessage('PDF generation failed. Please try again.');
     } finally {
       dossierRef.current.style.display = originalStyle;
       setPdfGenerating(false);
@@ -128,7 +170,7 @@ export default function CandidateDetails() {
             <p style={{ color: 'var(--text-muted)' }}>Applicant Profile Review</p>
           </div>
 
-          <div style={{ display: 'flex', gap: '0.75rem' }}>
+          <div className="action-buttons-row" style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
              {evaluation && (
               <button 
                 className="btn btn-secondary" 
@@ -138,34 +180,60 @@ export default function CandidateDetails() {
                 <Download size={16} /> {pdfGenerating ? 'Generating...' : 'Export Dossier'}
               </button>
              )}
-            <button 
-              className="btn btn-secondary" 
-              style={{ color: 'var(--error)', borderColor: 'rgba(239, 71, 111, 0.2)' }}
-              onClick={handleDeleteCandidate}
-              title="Permanently Delete Candidate"
-            >
-              <Trash2 size={16} /> Delete
-            </button>
-            <button 
-              className="btn btn-secondary" 
-              style={{ color: 'var(--error)', borderColor: 'rgba(239, 71, 111, 0.2)' }}
-              onClick={() => handleStatusChange('rejected')}
-              disabled={statusLoading || candidate.status === 'rejected'}
-            >
-              <XCircle size={16} /> Reject
-            </button>
-            <button 
-              className="btn btn-primary" 
-              onClick={() => handleStatusChange('shortlisted')}
-              disabled={statusLoading || candidate.status === 'shortlisted'}
-            >
-              <CheckCircle size={16} /> Shortlist
-            </button>
+            {isHrOrAdmin && (
+              <button 
+                className="btn btn-secondary" 
+                style={{ color: 'var(--error)', borderColor: 'rgba(239, 71, 111, 0.2)' }}
+                onClick={handleDeleteCandidate}
+                title="Permanently Delete Candidate"
+              >
+                <Trash2 size={16} /> Delete
+              </button>
+            )}
+            {isHrOrAdmin && (
+              <>
+                <button 
+                  className="btn btn-secondary" 
+                  style={{ color: 'var(--error)', borderColor: 'rgba(239, 71, 111, 0.2)' }}
+                  onClick={() => handleStatusChange('rejected')}
+                  disabled={statusLoading || candidate.status === 'rejected'}
+                >
+                  <XCircle size={16} /> Reject
+                </button>
+                <button 
+                  className="btn btn-primary" 
+                  onClick={() => handleStatusChange('shortlisted')}
+                  disabled={statusLoading || candidate.status === 'shortlisted'}
+                >
+                  <CheckCircle size={16} /> Shortlist
+                </button>
+              </>
+            )}
           </div>
         </div>
+        {statusMessage && (
+          <div className="alert alert-info" style={{ marginTop: '1rem' }}>{statusMessage}</div>
+        )}
+
+        {/* Pipeline stage selector */}
+        {isHrOrAdmin && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '1rem' }}>
+            {PIPELINE_STAGES.map(stage => (
+              <button
+                key={stage.key}
+                className={`btn ${candidate.status === stage.key ? 'btn-primary' : 'btn-ghost'}`}
+                style={{ padding: '0.4rem 0.75rem', fontSize: '0.78rem', width: 'auto' }}
+                disabled={statusLoading || candidate.status === stage.key}
+                onClick={() => handleStatusChange(stage.key)}
+              >
+                {stage.label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 0.6fr', gap: '2rem' }}>
+      <div className="details-grid">
         
         {/* Left column - Assessment metrics */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
@@ -260,6 +328,9 @@ export default function CandidateDetails() {
                 <p style={{ fontSize: '0.9rem', color: 'var(--text-light)', background: 'var(--bg-glass)', border: '1px solid var(--border-card)', padding: '1rem', borderRadius: '0.5rem', lineHeight: 1.5 }}>
                   {session.intro_transcript || 'No transcript recorded.'}
                 </p>
+                {session.intro_audio_url && (
+                  <audio src={session.intro_audio_url} controls style={{ width: '100%', marginTop: '0.5rem', height: 36 }} />
+                )}
               </div>
 
               <div>
@@ -275,6 +346,9 @@ export default function CandidateDetails() {
                       <p style={{ fontSize: '0.9rem', color: 'var(--text-light)', background: 'var(--bg-glass)', padding: '0.75rem', borderRadius: '0.5rem', lineHeight: 1.5 }}>
                         {answer.transcript || 'Waiting for candidate audio answer...'}
                       </p>
+                      {answer.answer_audio_url && (
+                        <audio src={answer.answer_audio_url} controls style={{ width: '100%', marginTop: '0.5rem', height: 32 }} />
+                      )}
                     </div>
                   );
                 })}
@@ -324,8 +398,75 @@ export default function CandidateDetails() {
                   <p style={{ fontSize: '0.9rem', color: '#fff', textTransform: 'uppercase' }}>{candidate.detected_language || 'N/A'}</p>
                 </div>
               </div>
+
+              {candidate.github_url && (
+                <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+                  <Globe size={16} style={{ color: 'var(--text-muted)' }} />
+                  <div>
+                    <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>GITHUB</p>
+                    <a href={candidate.github_url} target="_blank" rel="noreferrer" style={{ fontSize: '0.9rem', color: 'var(--primary-light)' }}>
+                      {candidate.github_url.replace(/^https?:\/\//, '')}
+                    </a>
+                  </div>
+                </div>
+              )}
+
+              <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+                <CheckCircle size={16} style={{ color: candidate.consent_given ? 'var(--success)' : 'var(--text-muted)' }} />
+                <div>
+                  <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>DATA CONSENT</p>
+                  <p style={{ fontSize: '0.9rem', color: '#fff' }}>{candidate.consent_given ? 'Given' : 'Not recorded'}</p>
+                </div>
+              </div>
             </div>
           </div>
+
+          {/* Recruiter Notes */}
+          <div className="dashboard-card">
+            <h3 style={{ fontSize: '0.95rem', fontWeight: 700, color: '#fff', marginBottom: '1rem' }}>Recruiter Notes</h3>
+            <form onSubmit={handleAddNote} style={{ marginBottom: '1rem' }}>
+              <textarea
+                className="form-input"
+                rows={3}
+                placeholder="Add a note about this candidate..."
+                value={newNote}
+                onChange={e => setNewNote(e.target.value)}
+                style={{ width: '100%', marginBottom: '0.5rem', resize: 'vertical' }}
+              />
+              <button type="submit" className="btn btn-secondary" style={{ width: 'auto', padding: '0.5rem 1rem' }} disabled={!newNote.trim()}>
+                Add Note
+              </button>
+            </form>
+            {notes.length === 0 ? (
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>No notes yet.</p>
+            ) : (
+              notes.map(note => (
+                <div key={note.id} style={{ padding: '0.75rem', background: 'var(--bg-glass)', borderRadius: '0.5rem', marginBottom: '0.5rem', border: '1px solid var(--border-card)' }}>
+                  <p style={{ fontSize: '0.85rem', color: 'var(--text-light)', lineHeight: 1.5 }}>{note.content}</p>
+                  <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.35rem' }}>
+                    {note.author_name} · {new Date(note.created_at).toLocaleString()}
+                  </p>
+                </div>
+              ))
+            )}
+          </div>
+
+          {/* Activity Timeline */}
+          {timeline.length > 0 && (
+            <div className="dashboard-card">
+              <h3 style={{ fontSize: '0.95rem', fontWeight: 700, color: '#fff', marginBottom: '1rem' }}>Activity Timeline</h3>
+              {timeline.slice(0, 8).map(item => (
+                <div key={item.id} style={{ paddingLeft: '1rem', borderLeft: '2px solid var(--border-card)', marginBottom: '0.75rem' }}>
+                  <p style={{ fontSize: '0.85rem', color: 'var(--text-light)' }}>
+                    <strong>{item.actor_name}</strong> — {item.action.replace(/_/g, ' ')}
+                  </p>
+                  <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                    {new Date(item.created_at).toLocaleString()}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
 
           <div className="dashboard-card">
             <h3 style={{ fontSize: '0.95rem', fontWeight: 700, color: '#fff', marginBottom: '1rem', borderBottom: '1px solid var(--border-card)', paddingBottom: '0.5rem' }}>
@@ -345,6 +486,57 @@ export default function CandidateDetails() {
               <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', textAlign: 'center' }}>No resume uploaded.</p>
             )}
           </div>
+
+          {candidate.resume_parsed_data && (
+            <div className="dashboard-card">
+              <h3 style={{ fontSize: '0.95rem', fontWeight: 700, color: '#fff', marginBottom: '1rem', borderBottom: '1px solid var(--border-card)', paddingBottom: '0.5rem' }}>
+                AI Extracted Resume Data
+              </h3>
+              
+              <div style={{ marginBottom: '1rem' }}>
+                <h4 style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.25rem', textTransform: 'uppercase' }}>Summary</h4>
+                <p style={{ fontSize: '0.85rem', color: 'var(--text-body)' }}>{candidate.resume_parsed_data.summary || 'N/A'}</p>
+              </div>
+
+              <div style={{ marginBottom: '1rem' }}>
+                <h4 style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.25rem', textTransform: 'uppercase' }}>Skills</h4>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem' }}>
+                  {(candidate.resume_parsed_data.skills || []).map((s, i) => (
+                    <span key={i} className="badge badge-primary" style={{ fontSize: '0.7rem' }}>{s}</span>
+                  ))}
+                  {(!candidate.resume_parsed_data.skills || candidate.resume_parsed_data.skills.length === 0) && (
+                    <span style={{ fontSize: '0.85rem', color: 'var(--text-body)' }}>N/A</span>
+                  )}
+                </div>
+              </div>
+
+              <div style={{ marginBottom: '1rem' }}>
+                <h4 style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.25rem', textTransform: 'uppercase' }}>Experience</h4>
+                {(candidate.resume_parsed_data.experience || []).map((exp, idx) => (
+                  <div key={idx} style={{ marginBottom: '0.75rem' }}>
+                    <p style={{ fontSize: '0.85rem', fontWeight: 600, color: '#fff' }}>{exp.title} <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>at {exp.company}</span></p>
+                    <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{exp.duration}</p>
+                  </div>
+                ))}
+                {(!candidate.resume_parsed_data.experience || candidate.resume_parsed_data.experience.length === 0) && (
+                  <span style={{ fontSize: '0.85rem', color: 'var(--text-body)' }}>N/A</span>
+                )}
+              </div>
+
+              <div>
+                <h4 style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.25rem', textTransform: 'uppercase' }}>Education</h4>
+                {(candidate.resume_parsed_data.education || []).map((edu, idx) => (
+                  <div key={idx} style={{ marginBottom: '0.5rem' }}>
+                    <p style={{ fontSize: '0.85rem', fontWeight: 600, color: '#fff' }}>{edu.degree}</p>
+                    <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{edu.institution} ({edu.year})</p>
+                  </div>
+                ))}
+                {(!candidate.resume_parsed_data.education || candidate.resume_parsed_data.education.length === 0) && (
+                  <span style={{ fontSize: '0.85rem', color: 'var(--text-body)' }}>N/A</span>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
       

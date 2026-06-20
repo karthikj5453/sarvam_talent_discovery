@@ -1,7 +1,10 @@
-from pydantic import BaseModel, EmailStr
-from typing import Optional, List, Dict, Any
+from pydantic import BaseModel, EmailStr, Field, field_validator
+from typing import Optional, List, Dict, Any, Literal
 from uuid import UUID
 from datetime import datetime
+
+VALID_ROLES = ("hr", "interviewer", "admin")
+VALID_STATUSES = ("applied", "screened", "shortlisted", "interviewing", "offered", "rejected")
 
 
 # ─── JOB SCHEMAS ─────────────────────────────────────────────
@@ -15,10 +18,11 @@ class JobBase(BaseModel):
     competency_weights: Optional[Dict[str, float]] = {
         "technical_depth": 0.25,
         "first_principles": 0.20,
-        "shipping_velocity": 0.20,
-        "ownership_signals": 0.15,
+        "shipping_velocity": 0.18,
+        "ownership_signals": 0.14,
         "curiosity_depth": 0.10,
-        "multilingual_fluency": 0.10,
+        "multilingual_fluency": 0.08,
+        "eq_score": 0.05,
     }
 
 class JobCreate(JobBase):
@@ -58,6 +62,7 @@ class CandidateCreate(CandidateBase):
 class CandidateResponse(CandidateBase):
     id: UUID
     resume_url: Optional[str] = None
+    resume_parsed_data: Optional[Dict[str, Any]] = None
     github_url: Optional[str] = None
     detected_language: Optional[str] = None
     status: str
@@ -67,11 +72,22 @@ class CandidateResponse(CandidateBase):
         from_attributes = True
 
 class CandidateStatusUpdate(BaseModel):
-    status: str  # applied | screened | shortlisted | interviewing | offered | rejected
+    status: str
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, v: str) -> str:
+        if v not in VALID_STATUSES:
+            raise ValueError(f"Invalid status. Must be one of: {sorted(VALID_STATUSES)}")
+        return v
 
 class PaginatedCandidates(BaseModel):
     total: int
     items: List[CandidateResponse]
+
+class PaginatedCandidatesWithScores(BaseModel):
+    total: int
+    items: List["CandidateWithScore"]
 
 
 # ─── SCREENING SCHEMAS ────────────────────────────────────────
@@ -88,6 +104,7 @@ class FollowUpAnswer(BaseModel):
 class ScreeningSessionResponse(BaseModel):
     id: UUID
     candidate_id: UUID
+    intro_audio_url: Optional[str] = None
     intro_transcript: Optional[str] = None
     intro_language: Optional[str] = None
     followup_questions: Optional[List[Any]] = []   # list of strings or dicts from DB
@@ -99,6 +116,9 @@ class ScreeningSessionResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+class ScreeningStartResponse(ScreeningSessionResponse):
+    screening_token: str
 
 class ScreeningStartRequest(BaseModel):
     candidate_id: UUID
@@ -126,6 +146,7 @@ class CompetencyScoreResponse(BaseModel):
     ownership_signals: Optional[float] = None
     curiosity_depth: Optional[float] = None
     multilingual_fluency: Optional[float] = None
+    eq_score: Optional[float] = None
     total_score: Optional[float] = None
     justifications: Optional[Dict[str, str]] = {}
     flags: Optional[List[str]] = []
@@ -175,6 +196,8 @@ class DropOffItem(BaseModel):
 class Token(BaseModel):
     access_token: str
     token_type: str
+    refresh_token: Optional[str] = None  # Kept for backward compat; actual token is in HTTP-only cookie
+
 
 class TokenData(BaseModel):
     email: Optional[str] = None
@@ -188,9 +211,44 @@ class UserLogin(BaseModel):
 
 class UserCreate(BaseModel):
     email: EmailStr
-    password: str
-    full_name: Optional[str] = None
+    password: str = Field(min_length=8, max_length=128)
+    full_name: Optional[str] = Field(None, max_length=255)
     role: Optional[str] = "hr"
+
+    @field_validator("role")
+    @classmethod
+    def validate_role(cls, v: Optional[str]) -> str:
+        role = v or "hr"
+        if role not in VALID_ROLES:
+            raise ValueError(f"Invalid role. Must be one of: {VALID_ROLES}")
+        return role
+
+
+class RecruiterNoteCreate(BaseModel):
+    content: str = Field(min_length=1, max_length=5000)
+    is_pinned: bool = False
+
+
+class RecruiterNoteResponse(BaseModel):
+    id: UUID
+    candidate_id: UUID
+    author_id: UUID
+    author_name: Optional[str] = None
+    content: str
+    is_pinned: bool
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ActivityLogResponse(BaseModel):
+    id: UUID
+    candidate_id: UUID
+    actor_name: Optional[str] = None
+    action: str
+    details: Optional[Dict[str, Any]] = None
+    created_at: datetime
 
 class UserResponse(BaseModel):
     id: UUID
@@ -202,3 +260,6 @@ class UserResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+PaginatedCandidatesWithScores.model_rebuild()

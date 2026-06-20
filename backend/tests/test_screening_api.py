@@ -3,7 +3,7 @@ from fastapi.testclient import TestClient
 from main import app
 from core.database import get_db
 from core.models import Job, Candidate, ScreeningSession, User
-from core.security import create_access_token
+from core.security import create_access_token, create_screening_token
 
 # We will override get_db to return our session-managed db_session fixture.
 # Since db_session is function-scoped, the override will be clean for each test.
@@ -50,13 +50,17 @@ def test_screening_api_flow(client, db_session):
     session_id = session_data["id"]
 
     # 3. Test /screening/upload-intro (with text transcript)
+    screening_token = session_data["screening_token"]
+    headers = {"X-Screening-Token": screening_token}
+    
     intro_resp = client.post(
         "/screening/upload-intro",
         data={
             "session_id": session_id,
             "transcript": "Hello, I am Preeti. I have been building user interfaces with React and CSS for 5 years.",
             "detected_language": "en-US"
-        }
+        },
+        headers=headers
     )
     assert intro_resp.status_code == 200
     assert intro_resp.json()["intro_transcript"] == "Hello, I am Preeti. I have been building user interfaces with React and CSS for 5 years."
@@ -68,7 +72,8 @@ def test_screening_api_flow(client, db_session):
             "session_id": session_id,
             "question_index": 0,
             "transcript": "I designed a modular design system that reduced CSS size by 40%."
-        }
+        },
+        headers=headers
     )
     assert answer_resp.status_code == 200
     answers = answer_resp.json()["followup_answers"]
@@ -76,7 +81,7 @@ def test_screening_api_flow(client, db_session):
     assert answers[0]["transcript"] == "I designed a modular design system that reduced CSS size by 40%."
 
     # 5. Test /screening/complete
-    complete_resp = client.post(f"/screening/complete/{session_id}")
+    complete_resp = client.post(f"/screening/complete/{session_id}", headers=headers)
     assert complete_resp.status_code == 200
     assert complete_resp.json()["completed_at"] is not None
 
@@ -219,7 +224,8 @@ def test_get_session_job(client, db_session):
     db_session.refresh(session)
 
     # Fetch job info via secure public endpoint
-    resp = client.get(f"/screening/{session.id}/job")
+    token = create_screening_token(str(candidate.id), str(session.id))
+    resp = client.get(f"/screening/{session.id}/job", headers={"X-Screening-Token": token})
     assert resp.status_code == 200
     data = resp.json()
     assert data["title"] == "Engineering Manager"

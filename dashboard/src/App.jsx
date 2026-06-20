@@ -8,13 +8,24 @@ import Candidates from './pages/Candidates';
 import CandidateDetails from './pages/CandidateDetails';
 import ThemeToggle from './components/ThemeToggle';
 import ErrorBoundary from './components/ErrorBoundary';
+import { useAuth } from './context/AuthContext';
 
-// Simple Route Guard to protect HR pages
 function ProtectedRoute({ children }) {
+  const { user, loading } = useAuth();
   const token = localStorage.getItem('hr_token');
-  if (!token) {
+
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh' }}>
+        <div className="spinner" style={{ width: 32, height: 32 }} />
+      </div>
+    );
+  }
+
+  if (!token || !user) {
     return <Navigate to="/login" replace />;
   }
+
   return (
     <>
       <ThemeToggle />

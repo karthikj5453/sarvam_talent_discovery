@@ -6,7 +6,7 @@ from uuid import UUID
 from core.database import get_db
 from core.models import Job
 from core.schemas import JobCreate, JobUpdate, JobResponse
-from api.dependencies import get_current_user
+from api.dependencies import get_current_user, require_hr_or_admin
 from core.models import User
 
 router = APIRouter()
@@ -43,7 +43,7 @@ def list_jobs(
 def create_job(
     payload: JobCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_hr_or_admin),
 ):
     """Create a new job posting."""
     job = Job(
@@ -82,7 +82,7 @@ def update_job(
     job_id: UUID,
     payload: JobUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_hr_or_admin),
 ):
     """Partially update a job (title, description, weights, active flag, etc.)."""
     job = db.query(Job).filter(Job.id == job_id).first()
@@ -104,7 +104,7 @@ def update_job(
 def delete_job(
     job_id: UUID,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_hr_or_admin),
 ):
     """Soft-delete a job by marking it inactive."""
     job = db.query(Job).filter(Job.id == job_id).first()

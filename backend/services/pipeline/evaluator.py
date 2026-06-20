@@ -103,6 +103,13 @@ async def run_evaluation(session_id: uuid.UUID, db: Session) -> Optional[Compete
         logger.error("[Evaluator] Session %s not found", session_id)
         return None
 
+    existing = db.query(CompetencyScore).filter(
+        CompetencyScore.session_id == session_id
+    ).first()
+    if existing:
+        logger.info("[Evaluator] Score already exists for session %s — skipping", session_id)
+        return existing
+
     candidate = db.query(Candidate).filter(Candidate.id == session.candidate_id).first()
     if not candidate:
         logger.error("[Evaluator] Candidate not found for session %s", session_id)

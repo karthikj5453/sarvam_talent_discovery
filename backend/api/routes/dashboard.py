@@ -5,12 +5,14 @@ from typing import List, Optional
 from uuid import UUID
 
 from core.database import get_db
-from core.models import Candidate, Job, CompetencyScore
+from core.models import Candidate, Job, CompetencyScore, ActivityLog
 from core.schemas import (
     CandidateResponse, CandidateStatusUpdate, CandidateWithScore,
     CompetencyScoreResponse, DashboardPipelineResponse, PipelineStageSummary,
+    PaginatedCandidatesWithScores,
 )
-from api.dependencies import get_current_user
+from api.dependencies import get_current_user, require_hr_or_admin
+from services import email_service
 from core.models import User
 
 router = APIRouter()
@@ -47,25 +49,29 @@ def get_pipeline(
 
 # ─── CANDIDATE LIST WITH SCORES ───────────────────────────────
 
-@router.get("/candidates", response_model=List[CandidateWithScore])
+@router.get("/candidates", response_model=PaginatedCandidatesWithScores)
 def get_candidates(
     job_id: Optional[UUID] = Query(None),
     status_filter: Optional[str] = Query(None, alias="status"),
+    search: Optional[str] = Query(None),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
-    Return candidates enriched with their latest competency score.
-    FIX: Uses a single bulk query for all scores instead of N+1 queries.
+    Return candidates enriched with their latest competency score (paginated).
     """
     q = db.query(Candidate)
     if job_id:
         q = q.filter(Candidate.job_id == job_id)
     if status_filter:
         q = q.filter(Candidate.status == status_filter)
+    if search:
+        term = f"%{search.strip()}%"
+        q = q.filter((Candidate.name.ilike(term)) | (Candidate.email.ilike(term)))
 
+    total = q.count()
     candidates = q.order_by(Candidate.created_at.desc()).offset(skip).limit(limit).all()
 
     # ── Bulk-fetch scores in ONE query (eliminates N+1) ───────
@@ -87,13 +93,14 @@ def get_candidates(
     else:
         scores_map = {}
 
-    return [
+    items = [
         CandidateWithScore(
             candidate=CandidateResponse.model_validate(c),
             score=CompetencyScoreResponse.model_validate(scores_map[c.id]) if c.id in scores_map else None,
         )
         for c in candidates
     ]
+    return PaginatedCandidatesWithScores(total=total, items=items)
 
 
 # ─── UPDATE STATUS (DRAG & DROP in Kanban) ────────────────────
@@ -103,7 +110,7 @@ def update_status(
     candidate_id: UUID,
     payload: CandidateStatusUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_hr_or_admin),
 ):
     """Move a candidate to a new pipeline stage from the dashboard."""
     if payload.status not in PIPELINE_STAGES:
@@ -116,9 +123,30 @@ def update_status(
     if not candidate:
         raise HTTPException(status_code=404, detail="Candidate not found")
 
+    old_status = candidate.status
     candidate.status = payload.status
+    db.add(ActivityLog(
+        candidate_id=candidate.id,
+        actor_id=current_user.id,
+        action="status_changed",
+        details={"from": old_status, "to": payload.status},
+    ))
     db.commit()
     db.refresh(candidate)
+
+    notify_statuses = {"shortlisted", "offered", "rejected", "interviewing"}
+    if payload.status in notify_statuses:
+        try:
+            job = db.query(Job).filter(Job.id == candidate.job_id).first()
+            email_service.send_status_update(
+                candidate_name=candidate.name,
+                candidate_email=candidate.email,
+                job_title=job.title if job else "the position",
+                new_status=payload.status,
+            )
+        except Exception:
+            pass
+
     return candidate
 
 

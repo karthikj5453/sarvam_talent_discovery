@@ -19,7 +19,11 @@ export default function Apply() {
       try {
         const activeJobs = await api.getJobs();
         setJobs(activeJobs);
-        if (activeJobs.length > 0) {
+        const params = new URLSearchParams(window.location.search);
+        const jobParam = params.get('job_id');
+        if (jobParam && activeJobs.some(j => j.id === jobParam)) {
+          setFormData(prev => ({ ...prev, jobId: jobParam }));
+        } else if (activeJobs.length > 0) {
           setFormData(prev => ({ ...prev, jobId: activeJobs[0].id }));
         }
       } catch {
@@ -48,15 +52,31 @@ export default function Apply() {
 
     try {
       const candidate = await api.applyJob(formData);
+
       const session = await api.startScreening(candidate.id);
-      if (resumeFile) await api.uploadResume(candidate.id, resumeFile);
+
+      if (resumeFile) {
+        try {
+          await api.uploadResume(candidate.id, resumeFile);
+        } catch (resumeErr) {
+          console.warn('Resume upload failed (non-blocking):', resumeErr.message);
+        }
+      }
 
       sessionStorage.setItem('screening_session_id', session.id);
       sessionStorage.setItem('candidate_id', candidate.id);
       sessionStorage.setItem('candidate_name', candidate.name);
+      if (session.screening_token) {
+        sessionStorage.setItem('screening_token', session.screening_token);
+      }
+
+      api.trackEvent('application_submitted', candidate.id, formData.jobId);
       navigate('/intro');
     } catch (err) {
-      setError(err.message || 'Something went wrong. Please try again.');
+      const msg = err.status === 409
+        ? 'You have already applied for this position. Contact HR if you need to continue your screening.'
+        : (err.message || 'Something went wrong. Please try again.');
+      setError(msg);
     } finally {
       setLoading(false);
     }
@@ -102,7 +122,7 @@ export default function Apply() {
 
         <form onSubmit={handleSubmit}>
           {/* Name + Email row */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+          <div className="form-grid-2">
             <div className="form-group">
               <label className="form-label"><User size={12} /> Full Name</label>
               <div className="form-input-wrap">
@@ -193,7 +213,19 @@ export default function Apply() {
               <input
                 id="resume-input" type="file" accept=".pdf"
                 style={{ display: 'none' }}
-                onChange={e => setResumeFile(e.target.files[0])}
+                onChange={e => {
+                  const f = e.target.files[0];
+                  if (f && f.size > 10 * 1024 * 1024) {
+                    setError('Resume must be under 10 MB.');
+                    return;
+                  }
+                  if (f && f.type !== 'application/pdf') {
+                    setError('Only PDF files are accepted.');
+                    return;
+                  }
+                  setResumeFile(f);
+                  setError(null);
+                }}
               />
             </div>
           </div>
@@ -219,7 +251,7 @@ export default function Apply() {
             </label>
           </div>
 
-          <button type="submit" className="btn btn-primary" disabled={loading}>
+          <button type="submit" className="btn btn-primary" disabled={loading || jobs.length === 0}>
             {loading ? <><span className="spinner" /> Submitting...</> : <>Apply & Start Screening <ChevronRight size={16} /></>}
           </button>
         </form>

@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Response, Cookie
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
+from typing import Optional
 from core.database import get_db
 from core.models import User
 from core.schemas import UserCreate, UserResponse, Token
-from core.security import hash_password, verify_password, create_access_token
+from core.security import hash_password, verify_password, create_access_token, create_refresh_token, decode_refresh_token
 
 from config import settings
 
@@ -53,7 +54,7 @@ def register(
         email=payload.email,
         hashed_password=hash_password(payload.password),
         full_name=payload.full_name,
-        role=payload.role or "hr",
+        role="admin" if user_count == 0 else (payload.role if payload.role != "admin" else "hr"),
     )
     db.add(user)
     db.commit()
@@ -64,8 +65,12 @@ def register(
 # ─── LOGIN ─────────────────────────────────────────────────────
 
 @router.post("/login", response_model=Token)
-def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    """Authenticate and return a JWT access token."""
+def login(
+    response: Response,
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    db: Session = Depends(get_db),
+):
+    """Authenticate and return a JWT access token. Refresh token is stored in HTTP-only cookie."""
     user = db.query(User).filter(User.email == form_data.username).first()
     if not user or not verify_password(form_data.password, user.hashed_password):
         raise HTTPException(
@@ -73,8 +78,83 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
             detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    token = create_access_token(data={"sub": user.email})
-    return {"access_token": token, "token_type": "bearer"}
+    access_token = create_access_token(data={"sub": user.email})
+    refresh_token = create_refresh_token(data={"sub": user.email})
+
+    # Store refresh token as HTTP-only secure cookie (not accessible via JS)
+    response.set_cookie(
+        key="hr_refresh_token",
+        value=refresh_token,
+        httponly=True,
+        secure=settings.APP_ENV != "development",   # HTTPS only in production
+        samesite="lax",
+        max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
+        path="/auth/refresh",   # scoped — only sent to the refresh endpoint
+    )
+
+    return {"access_token": access_token, "token_type": "bearer"}
+
+
+# ─── REFRESH ───────────────────────────────────────────────────
+
+@router.post("/refresh", response_model=Token)
+def refresh_token(
+    response: Response,
+    db: Session = Depends(get_db),
+    hr_refresh_token: Optional[str] = Cookie(None),
+):
+    """Issue a new access token using the HTTP-only refresh token cookie."""
+    if not hr_refresh_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token not found. Please log in again.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    email = decode_refresh_token(hr_refresh_token)
+    if not email:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired refresh token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    user = db.query(User).filter(User.email == email).first()
+    if not user or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found or account disabled",
+        )
+
+    access_token = create_access_token(data={"sub": user.email})
+    new_refresh_token = create_refresh_token(data={"sub": user.email})
+
+    # Rotate: set a new refresh token cookie
+    response.set_cookie(
+        key="hr_refresh_token",
+        value=new_refresh_token,
+        httponly=True,
+        secure=settings.APP_ENV != "development",
+        samesite="lax",
+        max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
+        path="/auth/refresh",
+    )
+
+    return {"access_token": access_token, "token_type": "bearer"}
+
+
+# ─── LOGOUT ────────────────────────────────────────────────────
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+def logout(response: Response):
+    """Clear the HTTP-only refresh token cookie."""
+    response.delete_cookie(
+        key="hr_refresh_token",
+        path="/auth/refresh",
+        httponly=True,
+        secure=settings.APP_ENV != "development",
+        samesite="lax",
+    )
+    return
 
 
 # ─── ME ────────────────────────────────────────────────────────

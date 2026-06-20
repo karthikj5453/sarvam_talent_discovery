@@ -4,8 +4,6 @@ import { api } from '../services/api';
 import { Mic, Square, RotateCcw, ChevronRight, Volume2, CheckCircle, AlertCircle, Code } from 'lucide-react';
 import Editor from '@monaco-editor/react';
 
-const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-
 const FALLBACK_QUESTIONS = [
   'Describe a challenging technical problem you solved recently.',
   'How do you handle deadline pressure when shipping fast?',
@@ -23,8 +21,8 @@ export default function Interview() {
   const [audioBlob, setAudioBlob] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  
-  // New State for Sandbox & Avatar
+  const [questionsLoading, setQuestionsLoading] = useState(true);
+  const [questionsError, setQuestionsError] = useState(null);
   const [isAiSpeaking, setIsAiSpeaking] = useState(false);
   const [isEngineering, setIsEngineering] = useState(false);
   const [code, setCode] = useState('// Write your solution here...\n');
@@ -35,6 +33,7 @@ export default function Interview() {
 
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
+  const mimeTypeRef = useRef('audio/webm');
   const navigate = useNavigate();
 
   const sessionId = sessionStorage.getItem('screening_session_id');
@@ -49,29 +48,31 @@ export default function Interview() {
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
-    // Fetch session details to load interview questions
-    fetch(`${BASE_URL}/screening/${sessionId}`)
-      .then(r => r.json())
-      .then(data => {
+    async function loadSession() {
+      try {
+        const data = await api.getScreeningSession(sessionId);
         const qs = data.followup_questions?.length
           ? data.followup_questions.map(q => typeof q === 'string' ? q : q?.question || q)
           : FALLBACK_QUESTIONS;
         setQuestions(qs);
-      })
-      .catch(() => setQuestions(FALLBACK_QUESTIONS));
+      } catch {
+        setQuestionsError('Failed to load interview questions. Please refresh or contact support.');
+        setQuestions(FALLBACK_QUESTIONS);
+      } finally {
+        setQuestionsLoading(false);
+      }
 
-    // Fetch associated job details to determine if sandbox is needed (engineering role)
-    fetch(`${BASE_URL}/screening/${sessionId}/job`)
-      .then(res => res.json())
-      .then(job => {
-        if (job && job.title) {
+      try {
+        const job = await api.getSessionJob(sessionId);
+        if (job?.title) {
           const titleLower = job.title.toLowerCase();
           if (titleLower.includes('engineer') || titleLower.includes('developer') || titleLower.includes('architect')) {
             setIsEngineering(true);
           }
         }
-      })
-      .catch(e => console.error('Failed to load job details for session:', e));
+      } catch (_) { /* optional */ }
+    }
+    loadSession();
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
@@ -100,10 +101,11 @@ export default function Interview() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/ogg';
+      mimeTypeRef.current = mimeType;
       mediaRecorderRef.current = new MediaRecorder(stream, { mimeType });
       mediaRecorderRef.current.ondataavailable = e => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
       mediaRecorderRef.current.onstop = () => {
-        const blob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
+        const blob = new Blob(audioChunksRef.current, { type: mimeTypeRef.current });
         setAudioBlob(blob);
         setAudioUrl(URL.createObjectURL(blob));
         stream.getTracks().forEach(t => t.stop());
@@ -131,7 +133,8 @@ export default function Interview() {
     try {
       // Send code along with transcript if we are using the sandbox
       // (This could be attached to the transcript later, but we upload standard answer first)
-      await api.uploadAnswer(sessionId, currentIndex, audioBlob);
+      const codeToSend = isEngineering ? code : null;
+      await api.uploadAnswer(sessionId, currentIndex, audioBlob, codeToSend, mimeTypeRef.current);
       setAudioUrl(null);
       setAudioBlob(null);
 
@@ -148,6 +151,17 @@ export default function Interview() {
       setLoading(false);
     }
   };
+
+  if (questionsLoading) {
+    return (
+      <div className="app-container" style={{ textAlign: 'center' }}>
+        <div className="glass-card" style={{ padding: '4rem 2rem' }}>
+          <div className="spinner" style={{ margin: '0 auto 1rem', width: 32, height: 32 }} />
+          <p style={{ color: 'var(--text-muted)' }}>Loading interview questions...</p>
+        </div>
+      </div>
+    );
+  }
 
   if (questions.length === 0) {
     return (
@@ -173,7 +187,7 @@ export default function Interview() {
         ))}
       </div>
 
-      <div style={{ display: 'flex', gap: '2rem', flexWrap: 'wrap' }}>
+      <div className={`interview-layout ${isEngineering ? 'interview-layout--engineering' : ''}`}>
         
         {/* Left Side: Interview Controls */}
         <div className="glass-card" style={{ flex: '1 1 500px' }}>
@@ -189,7 +203,7 @@ export default function Interview() {
           <div style={{ height: 3, background: 'rgba(255,255,255,0.06)', borderRadius: 2, marginBottom: '1.75rem', overflow: 'hidden' }}>
             <div style={{
               height: '100%',
-              width: `${((currentIndex) / questions.length) * 100}%`,
+              width: `${((currentIndex + 1) / questions.length) * 100}%`,
               background: 'linear-gradient(90deg, var(--primary), var(--accent))',
               borderRadius: 2,
               transition: 'width 0.5s ease'
@@ -203,6 +217,12 @@ export default function Interview() {
               <Volume2 size={15} />
             </button>
           </div>
+
+          {questionsError && (
+            <div className="alert alert-error" style={{ marginBottom: '1rem' }}>
+              <AlertCircle size={16} /> {questionsError}
+            </div>
+          )}
 
           {error && (
             <div className="alert alert-error">

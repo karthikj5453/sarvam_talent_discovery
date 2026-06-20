@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
+import { useAuth } from '../context/AuthContext';
 import { Zap, Mail, Lock, ArrowRight, UserPlus, AlertCircle, CheckCircle } from 'lucide-react';
 
 export default function Login() {
@@ -10,13 +11,13 @@ export default function Login() {
   const [error, setError] = useState(null);
   const [successMsg, setSuccessMsg] = useState(null);
   const navigate = useNavigate();
+  const { login } = useAuth();
 
   const handleLogin = async e => {
     e.preventDefault();
     setLoading(true); setError(null); setSuccessMsg(null);
     try {
-      await api.login(email, password);
-      await api.getMe();
+      await login(email, password);
       navigate('/');
     } catch (err) {
       setError(err.message || 'Login failed. Please check your credentials.');
@@ -32,11 +33,11 @@ export default function Login() {
     try {
       await api.register({ email: demoEmail, password: demoPassword, full_name: 'Demo HR Lead', role: 'hr' });
       setSuccessMsg('Demo account created! Logging in…');
-      await api.login(demoEmail, demoPassword);
+      await login(demoEmail, demoPassword);
       setTimeout(() => navigate('/'), 800);
     } catch (err) {
       if (err.message?.includes('already registered')) {
-        try { await api.login(demoEmail, demoPassword); navigate('/'); } catch { setError('Demo login failed.'); }
+        try { await login(demoEmail, demoPassword); navigate('/'); } catch { setError('Demo login failed.'); }
       } else {
         setError(err.message || 'Could not create demo account.');
       }

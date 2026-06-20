@@ -645,3 +645,68 @@ audio {
   font-size: 0.8rem;
   color: var(--text-body);
 }
+
+/* ─── Responsive ─────────────────────────────────────────────── */
+.form-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.interview-layout {
+  display: flex;
+  gap: 2rem;
+  flex-wrap: wrap;
+}
+
+.interview-layout--engineering .glass-card {
+  flex: 1 1 100%;
+}
+
+.complete-card {
+  padding: 3rem 2.5rem;
+}
+
+@media (max-width: 768px) {
+  .app-container {
+    padding: 1rem;
+    max-width: 100% !important;
+  }
+
+  .glass-card {
+    padding: 1.5rem 1.25rem !important;
+  }
+
+  .form-grid-2 {
+    grid-template-columns: 1fr;
+  }
+
+  .complete-card {
+    padding: 2rem 1.25rem !important;
+  }
+
+  .interview-layout {
+    flex-direction: column;
+  }
+
+  .lang-tags {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  #root {
+    justify-content: flex-start;
+    padding-top: 3rem;
+  }
+}
+
+@media (max-width: 390px) {
+  .title-gradient {
+    font-size: 1.5rem !important;
+  }
+
+  .record-btn {
+    width: 72px !important;
+    height: 72px !important;
+  }
+}

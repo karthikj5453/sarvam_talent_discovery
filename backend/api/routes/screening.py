@@ -1,6 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, BackgroundTasks, Request
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, BackgroundTasks, Header, Request
 from sqlalchemy.orm import Session
-from typing import Optional
+from typing import Optional, List
 from uuid import UUID
 from datetime import datetime, timezone
 import logging
@@ -10,7 +10,11 @@ from core.models import Candidate, Job, ScreeningSession, CompetencyScore
 from core.schemas import (
     ScreeningStartRequest,
     ScreeningSessionResponse,
+    ScreeningStartResponse,
 )
+from core.security import create_screening_token
+from api.dependencies import verify_screening_read_access, _validate_screening_token
+from api.limiter import limiter
 from services.sarvam.sarvam_client import transcribe_and_translate, SarvamError
 from services.storage.s3_client import upload_audio, upload_resume as s3_upload_resume, key_to_url
 from config import settings
@@ -25,10 +29,25 @@ MAX_RESUME_BYTES = 10 * 1024 * 1024   # 10 MB hard cap for PDF
 ALLOWED_RESUME_MIME = {"application/pdf"}
 
 
+def _session_with_token(session: ScreeningSession) -> ScreeningStartResponse:
+    token = create_screening_token(str(session.candidate_id), str(session.id))
+    return ScreeningStartResponse(
+        **ScreeningSessionResponse.model_validate(session).model_dump(),
+        screening_token=token,
+    )
+
+
+def _assert_session_open(session: ScreeningSession) -> None:
+    if session.completed_at:
+        raise HTTPException(status_code=400, detail="Session already completed")
+
+
 # ─── START SCREENING ──────────────────────────────────────────
 
-@router.post("/start", response_model=ScreeningSessionResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/start", response_model=ScreeningStartResponse, status_code=status.HTTP_201_CREATED)
+@limiter.limit("10/minute")
 def start_screening(
+    request: Request,
     payload: ScreeningStartRequest,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
@@ -59,7 +78,7 @@ def start_screening(
         .first()
     )
     if existing:
-        return existing
+        return _session_with_token(existing)
 
     session = ScreeningSession(candidate_id=payload.candidate_id)
     db.add(session)
@@ -80,55 +99,66 @@ def start_screening(
     except Exception as e:
         logger.warning("[Email] Failed to schedule application received email: %s", e)
 
-    return session
+    return _session_with_token(session)
 
 
 # ─── GET SESSION ──────────────────────────────────────────────
 
 @router.get("/{session_id}", response_model=ScreeningSessionResponse)
-def get_session(session_id: UUID, db: Session = Depends(get_db)):
-    session = db.query(ScreeningSession).filter(ScreeningSession.id == session_id).first()
-    if not session:
-        raise HTTPException(status_code=404, detail="Screening session not found")
+def get_session(
+    session_id: UUID,
+    session: ScreeningSession = Depends(verify_screening_read_access),
+):
     return session
 
 
 # ─── UPLOAD RESUME ────────────────────────────────────────────
 
 @router.post("/upload-resume")
+@limiter.limit("5/minute")
 async def upload_resume(
+    request: Request,
+    background_tasks: BackgroundTasks,
     candidate_id: UUID = Form(...),
     file: Optional[UploadFile] = File(None),
-    resume_url: Optional[str] = Form(None),
+    x_screening_token: Optional[str] = Header(None, alias="X-Screening-Token"),
     db: Session = Depends(get_db),
 ):
     """
-    Upload a resume. Accepts either:
-      - A direct file upload (PDF only, max 10 MB)
-      - A pre-uploaded URL string (if client uploaded directly to S3)
+    Upload a resume PDF (max 10 MB). Requires valid screening token.
     """
     candidate = db.query(Candidate).filter(Candidate.id == candidate_id).first()
     if not candidate:
         raise HTTPException(status_code=404, detail="Candidate not found")
 
-    final_url = resume_url
+    open_session = (
+        db.query(ScreeningSession)
+        .filter(
+            ScreeningSession.candidate_id == candidate_id,
+            ScreeningSession.completed_at == None,
+        )
+        .first()
+    )
+    if not open_session:
+        raise HTTPException(status_code=400, detail="No active screening session")
+    _validate_screening_token(open_session, x_screening_token)
+
+    final_url = None
     file_bytes = None
 
-    if file and not resume_url:
-        # ── File type validation ───────────────────────────────
+    if file:
         if file.content_type not in ALLOWED_RESUME_MIME:
             raise HTTPException(
                 status_code=400,
                 detail=f"Invalid file type '{file.content_type}'. Only PDF files are accepted.",
             )
 
-        # ── File size validation (read with a cap) ─────────────
         file_bytes = await file.read(MAX_RESUME_BYTES + 1)
         if len(file_bytes) > MAX_RESUME_BYTES:
-            raise HTTPException(
-                status_code=413,
-                detail="Resume must be under 10 MB.",
-            )
+            raise HTTPException(status_code=413, detail="Resume must be under 10 MB.")
+
+        if not file_bytes.startswith(b"%PDF-"):
+            raise HTTPException(status_code=400, detail="Invalid PDF file.")
 
         try:
             s3_key = s3_upload_resume(file_bytes, str(candidate_id))
@@ -149,6 +179,25 @@ async def upload_resume(
             if resume_text:
                 candidate.resume_text = resume_text[:10000]  # cap at 10k chars
                 logger.info("[Screening] Extracted %d chars from resume PDF", len(resume_text))
+                
+                async def _parse_resume_bg(cid: UUID, text: str):
+                    from core.database import SessionLocal
+                    from services.llm.resume_parser import parse_resume_with_gemini
+                    parsed_data = await parse_resume_with_gemini(text)
+                    if parsed_data:
+                        bg_db = SessionLocal()
+                        try:
+                            cand = bg_db.query(Candidate).filter(Candidate.id == cid).first()
+                            if cand:
+                                cand.resume_parsed_data = parsed_data
+                                bg_db.commit()
+                        except Exception as e:
+                            logger.error("[Screening] Failed to save parsed resume data: %s", e)
+                        finally:
+                            bg_db.close()
+                            
+                background_tasks.add_task(_parse_resume_bg, candidate_id, candidate.resume_text)
+                
         except Exception as e:
             logger.warning("[Screening] PDF text extraction failed: %s", e)
 
@@ -159,11 +208,14 @@ async def upload_resume(
 # ─── UPLOAD INTRO AUDIO ───────────────────────────────────────
 
 @router.post("/upload-intro", response_model=ScreeningSessionResponse)
+@limiter.limit("10/minute")
 async def upload_intro(
+    request: Request,
     session_id: UUID = Form(...),
     file: Optional[UploadFile] = File(None),
     transcript: Optional[str] = Form(None),
     detected_language: Optional[str] = Form(None),
+    x_screening_token: Optional[str] = Header(None, alias="X-Screening-Token"),
     db: Session = Depends(get_db),
 ):
     """
@@ -179,6 +231,8 @@ async def upload_intro(
     session = db.query(ScreeningSession).filter(ScreeningSession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+    _assert_session_open(session)
+    _validate_screening_token(session, x_screening_token)
 
     final_transcript = transcript
     final_language = detected_language
@@ -299,11 +353,15 @@ def _default_questions() -> list:
 # ─── UPLOAD ANSWER AUDIO ──────────────────────────────────────
 
 @router.post("/upload-answer", response_model=ScreeningSessionResponse)
+@limiter.limit("20/minute")
 async def upload_answer(
+    request: Request,
     session_id: UUID = Form(...),
     question_index: int = Form(...),
     file: Optional[UploadFile] = File(None),
     transcript: Optional[str] = Form(None),
+    code: Optional[str] = Form(None),
+    x_screening_token: Optional[str] = Header(None, alias="X-Screening-Token"),
     db: Session = Depends(get_db),
 ):
     """
@@ -314,6 +372,12 @@ async def upload_answer(
     session = db.query(ScreeningSession).filter(ScreeningSession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+    _assert_session_open(session)
+    _validate_screening_token(session, x_screening_token)
+
+    questions = session.followup_questions or []
+    if question_index < 0 or (questions and question_index >= len(questions)):
+        raise HTTPException(status_code=400, detail="Invalid question index")
 
     final_transcript = transcript
     answer_audio_url = None
@@ -353,6 +417,7 @@ async def upload_answer(
     answers[question_index] = {
         "transcript": final_transcript,
         "answer_audio_url": answer_audio_url,
+        "code": code,
     }
 
     session.followup_answers = answers
@@ -364,10 +429,13 @@ async def upload_answer(
 # ─── COMPLETE SCREENING ───────────────────────────────────────
 
 @router.post("/complete/{session_id}", response_model=ScreeningSessionResponse)
+@limiter.limit("5/minute")
 async def complete_screening(
-    session_id: UUID,                         # FIX: now a proper path param
+    request: Request,
+    session_id: UUID,
     background_tasks: BackgroundTasks,
     proctoring_flags: Optional[dict] = None,
+    x_screening_token: Optional[str] = Header(None, alias="X-Screening-Token"),
     db: Session = Depends(get_db),
 ):
     """
@@ -383,8 +451,17 @@ async def complete_screening(
     session = db.query(ScreeningSession).filter(ScreeningSession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-    if session.completed_at:
-        raise HTTPException(status_code=400, detail="Session already completed")
+    _assert_session_open(session)
+    _validate_screening_token(session, x_screening_token)
+
+    if not session.intro_transcript:
+        raise HTTPException(status_code=400, detail="Intro recording required before completing")
+
+    existing_score = db.query(CompetencyScore).filter(
+        CompetencyScore.session_id == session_id
+    ).first()
+    if existing_score:
+        return session
 
     session.completed_at = datetime.now(timezone.utc)
     if proctoring_flags:
@@ -433,15 +510,12 @@ async def complete_screening(
 
 # ─── SECURE PUBLIC ROUTE TO FETCH JOB OF AN ACTIVE SESSION ───
 @router.get("/{session_id}/job", status_code=status.HTTP_200_OK)
-def get_session_job(session_id: UUID, db: Session = Depends(get_db)):
-    """
-    Public route: Returns the job details of a screening session.
-    Used by the candidate interview portal to determine if the role requires technical sandbox support.
-    Requires no authentication because the valid session_id acts as a proof of authority.
-    """
-    session = db.query(ScreeningSession).filter(ScreeningSession.id == session_id).first()
-    if not session:
-        raise HTTPException(status_code=404, detail="Screening session not found")
+def get_session_job(
+    session_id: UUID,
+    session: ScreeningSession = Depends(verify_screening_read_access),
+    db: Session = Depends(get_db),
+):
+    """Return job details for a screening session (requires screening token or HR auth)."""
     candidate = db.query(Candidate).filter(Candidate.id == session.candidate_id).first()
     if not candidate:
         raise HTTPException(status_code=404, detail="Candidate not found")

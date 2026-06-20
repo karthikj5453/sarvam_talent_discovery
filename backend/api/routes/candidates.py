@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Query, Request
-from slowapi import Limiter
+from api.limiter import limiter
 from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
@@ -8,19 +8,18 @@ from uuid import UUID
 import logging
 
 from core.database import get_db
-from core.models import Candidate, Job, CompetencyScore, ScreeningSession, AnalyticsEvent
+from core.models import Candidate, Job, CompetencyScore, ScreeningSession, AnalyticsEvent, ActivityLog
 from core.schemas import (
     CandidateCreate, CandidateResponse, CandidateStatusUpdate,
-    CompetencyScoreResponse, CandidateWithScore,
+    CompetencyScoreResponse, CandidateWithScore, PaginatedCandidates,
 )
-from api.dependencies import get_current_user, require_admin
+from api.dependencies import get_current_user, require_admin, require_hr_or_admin
 from core.models import User
 from services import email_service
 from services.storage.s3_client import delete_file, url_to_key
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
-limiter = Limiter(key_func=get_remote_address)
 
 VALID_STATUSES = {"applied", "screened", "shortlisted", "interviewing", "offered", "rejected"}
 
@@ -32,22 +31,30 @@ ALLOWED_RESUME_MIME = {"application/pdf"}
 
 # ─── LIST CANDIDATES ──────────────────────────────────────────
 
-@router.get("/", response_model=List[CandidateResponse])
+@router.get("/", response_model=PaginatedCandidates)
 def list_candidates(
     job_id: Optional[UUID] = Query(None, description="Filter by job"),
     status_filter: Optional[str] = Query(None, alias="status", description="Filter by pipeline status"),
+    search: Optional[str] = Query(None, description="Search name or email"),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """List candidates, optionally filtered by job or pipeline status."""
+    """List candidates with pagination and optional filters."""
     query = db.query(Candidate)
     if job_id:
         query = query.filter(Candidate.job_id == job_id)
     if status_filter:
         query = query.filter(Candidate.status == status_filter)
-    return query.order_by(Candidate.created_at.desc()).offset(skip).limit(limit).all()
+    if search:
+        term = f"%{search.strip()}%"
+        query = query.filter(
+            (Candidate.name.ilike(term)) | (Candidate.email.ilike(term))
+        )
+    total = query.count()
+    items = query.order_by(Candidate.created_at.desc()).offset(skip).limit(limit).all()
+    return PaginatedCandidates(total=total, items=items)
 
 
 # ─── CREATE CANDIDATE (HR) ────────────────────────────────────
@@ -56,9 +63,9 @@ def list_candidates(
 def create_candidate(
     payload: CandidateCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_hr_or_admin),
 ):
-    """Register a new candidate for a job. Called before the screening flow begins."""
+    """Register a new candidate for a job. HR/Admin only."""
     # Validate job exists
     job = db.query(Job).filter(Job.id == payload.job_id, Job.is_active == True).first()
     if not job:
@@ -84,7 +91,7 @@ def create_candidate(
     db.add(candidate)
     try:
         db.commit()
-    except Exception:
+    except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=409, detail="Candidate already applied for this job")
     db.refresh(candidate)
@@ -117,6 +124,38 @@ def get_candidate(
     )
 
 
+@router.get("/{candidate_id}/sessions", response_model=List[dict])
+def get_candidate_sessions(
+    candidate_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return screening sessions for a candidate (latest first)."""
+    candidate = db.query(Candidate).filter(Candidate.id == candidate_id).first()
+    if not candidate:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+
+    sessions = (
+        db.query(ScreeningSession)
+        .filter(ScreeningSession.candidate_id == candidate_id)
+        .order_by(ScreeningSession.created_at.desc())
+        .all()
+    )
+    return [
+        {
+            "id": str(s.id),
+            "completed_at": s.completed_at.isoformat() if s.completed_at else None,
+            "intro_transcript": s.intro_transcript,
+            "intro_audio_url": s.intro_audio_url,
+            "followup_questions": s.followup_questions,
+            "followup_answers": s.followup_answers,
+            "proctoring_flags": s.proctoring_flags,
+            "created_at": s.created_at.isoformat() if s.created_at else None,
+        }
+        for s in sessions
+    ]
+
+
 # ─── UPDATE STATUS ────────────────────────────────────────────
 
 @router.patch("/{candidate_id}/status", response_model=CandidateResponse)
@@ -124,9 +163,9 @@ def update_candidate_status(
     candidate_id: UUID,
     payload: CandidateStatusUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_hr_or_admin),
 ):
-    """Move a candidate to a new pipeline stage."""
+    """Move a candidate to a new pipeline stage. HR/Admin only."""
     if payload.status not in VALID_STATUSES:
         raise HTTPException(
             status_code=400,
@@ -137,7 +176,14 @@ def update_candidate_status(
     if not candidate:
         raise HTTPException(status_code=404, detail="Candidate not found")
 
+    old_status = candidate.status
     candidate.status = payload.status
+    db.add(ActivityLog(
+        candidate_id=candidate.id,
+        actor_id=current_user.id,
+        action="status_changed",
+        details={"from": old_status, "to": payload.status},
+    ))
     db.commit()
     db.refresh(candidate)
 
@@ -194,7 +240,7 @@ def public_apply(request: Request, payload: CandidateCreate, db: Session = Depen
     db.add(candidate)
     try:
         db.commit()
-    except Exception:
+    except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=409, detail="You have already applied for this position")
     db.refresh(candidate)
@@ -283,7 +329,7 @@ def gdpr_erase_candidate(
 def delete_candidate(
     candidate_id: UUID,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_hr_or_admin),
 ):
     """
     Hard delete a candidate and all associated records (scores, sessions, events, files).

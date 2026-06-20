@@ -12,7 +12,7 @@ class User(Base):
     email = Column(String(255), unique=True, nullable=False, index=True)
     hashed_password = Column(String(255), nullable=False)
     full_name = Column(String(255))
-    role = Column(String(50), default="hr")   # hr | admin
+    role = Column(String(50), default="hr")   # hr | admin | interviewer
     is_active = Column(Boolean, default=True)
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, onupdate=func.now())
@@ -46,6 +46,7 @@ class Candidate(Base):
     job_id = Column(UUID(as_uuid=True), ForeignKey("jobs.id"), index=True)
     resume_url = Column(Text)
     resume_text = Column(Text)            # extracted plain-text from PDF (via PyMuPDF)
+    resume_parsed_data = Column(JSONB)    # extracted structured data from Gemini
     github_url = Column(String(255))
     detected_language = Column(String(50))
     status = Column(String(50), default="applied", index=True)
@@ -108,4 +109,27 @@ class AnalyticsEvent(Base):
     candidate_id = Column(UUID(as_uuid=True), ForeignKey("candidates.id"))
     job_id = Column(UUID(as_uuid=True), ForeignKey("jobs.id"))
     event_metadata = Column(JSONB)
+    created_at = Column(TIMESTAMP, server_default=func.now())
+
+
+class RecruiterNote(Base):
+    __tablename__ = "recruiter_notes"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    candidate_id = Column(UUID(as_uuid=True), ForeignKey("candidates.id"), index=True, nullable=False)
+    author_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    content = Column(Text, nullable=False)
+    is_pinned = Column(Boolean, default=False)
+    created_at = Column(TIMESTAMP, server_default=func.now())
+    updated_at = Column(TIMESTAMP, onupdate=func.now())
+
+
+class ActivityLog(Base):
+    __tablename__ = "activity_logs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    candidate_id = Column(UUID(as_uuid=True), ForeignKey("candidates.id"), index=True, nullable=False)
+    actor_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    action = Column(String(100), nullable=False)
+    details = Column(JSONB)
     created_at = Column(TIMESTAMP, server_default=func.now())

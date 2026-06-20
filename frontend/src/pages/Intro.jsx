@@ -15,6 +15,7 @@ export default function Intro() {
 
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
+  const mimeTypeRef = useRef('audio/webm');
   const navigate = useNavigate();
 
   const sessionId = sessionStorage.getItem('screening_session_id');
@@ -30,10 +31,11 @@ export default function Intro() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/ogg';
+      mimeTypeRef.current = mimeType;
       mediaRecorderRef.current = new MediaRecorder(stream, { mimeType });
       mediaRecorderRef.current.ondataavailable = e => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
       mediaRecorderRef.current.onstop = () => {
-        const blob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
+        const blob = new Blob(audioChunksRef.current, { type: mimeTypeRef.current });
         setAudioBlob(blob);
         setAudioUrl(URL.createObjectURL(blob));
         stream.getTracks().forEach(t => t.stop());
@@ -59,7 +61,7 @@ export default function Intro() {
     setLoading(true);
     setError(null);
     try {
-      await api.uploadIntro(sessionId, audioBlob);
+      await api.uploadIntro(sessionId, audioBlob, mimeTypeRef.current);
       navigate('/interview');
     } catch (err) {
       setError(err.message || 'Upload failed. Please try again.');

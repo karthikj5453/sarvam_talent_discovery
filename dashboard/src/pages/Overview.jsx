@@ -120,7 +120,7 @@ export default function Overview() {
       </div>
 
       {/* Visual Analytics Row */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr', gap: '1.5rem', marginTop: '0.5rem', marginBottom: '1.5rem' }}>
+      <div className="analytics-grid">
         
         {/* Pipeline Chart */}
         <div className="dashboard-card" style={{ animationDelay: '0.2s', display: 'flex', flexDirection: 'column' }}>
@@ -197,7 +197,7 @@ export default function Overview() {
       </div>
 
       {/* Two-panel Grid for Activity and Info */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1.25fr 0.75fr', gap: '1.5rem' }}>
+      <div className="bottom-grid">
 
         {/* Screening Activity Table */}
         <div className="dashboard-card" style={{ animationDelay: '0.3s' }}>

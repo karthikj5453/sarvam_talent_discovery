@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "change_me_in_production"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
     # ─── AWS S3 ───────────────────────────────────────────────────
     AWS_ACCESS_KEY_ID: str = ""
@@ -93,9 +94,5 @@ if settings.SECRET_KEY.lower() in _WEAK_KEYS or len(settings.SECRET_KEY) < 32:
         "Generate a strong key with: openssl rand -hex 32\n"
         "Then set SECRET_KEY=<result> in backend/.env\n"
     )
-    if settings.APP_ENV == "production":
-        print(_msg, file=sys.stderr)
-        sys.exit(1)
-    else:
-        # In dev/staging — warn loudly but don't exit so developers can still run locally
-        print(f"[WARNING]{_msg}", file=sys.stderr)
+    print(_msg, file=sys.stderr)
+    sys.exit(1)
