@@ -404,8 +404,6 @@ async def complete_screening(
             if score:
                 logger.info("[Screening] BG evaluation done, score=%.2f", score.total_score,
                             extra={"session_id": str(sid)})
-                # ── Send emails NOW that we have a real score ─────────
-                _send_post_eval_emails(bg_db, candidate_id, score)
             else:
                 logger.warning("[Screening] BG evaluation returned None",
                                extra={"session_id": str(sid)})
@@ -426,38 +424,3 @@ async def complete_screening(
         background_tasks.add_task(_run_eval_bg, session.id, session.candidate_id)
 
     return session
-
-
-def _send_post_eval_emails(db, candidate_id, score) -> None:
-    """Send candidate + HR emails AFTER evaluation completes (score is now real)."""
-    from services import email_service
-    from core.models import User, Candidate, Job
-    try:
-        candidate = db.query(Candidate).filter(Candidate.id == candidate_id).first()
-        job = db.query(Job).filter(Job.id == candidate.job_id).first() if candidate else None
-        job_title = job.title if job else "the position"
-        total_score = score.total_score if score else None
-        dashboard_url = (
-            f"https://sarvam-talent-discovery-hrdashboard.netlify.app/candidates/{candidate_id}"
-        )
-
-        if candidate:
-            email_service.send_screening_complete(
-                candidate_name=candidate.name,
-                candidate_email=candidate.email,
-                job_title=job_title,
-                total_score=total_score,
-            )
-
-        # Notify all active HR users
-        hr_users = db.query(User).filter(User.is_active == True).all()
-        for hr_user in hr_users:
-            email_service.send_hr_new_candidate_alert(
-                hr_email=hr_user.email,
-                candidate_name=candidate.name if candidate else "Unknown",
-                job_title=job_title,
-                total_score=total_score,
-                dashboard_url=dashboard_url,
-            )
-    except Exception as e:
-        logger.warning("[Email] Post-evaluation emails failed: %s", e)

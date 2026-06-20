@@ -93,50 +93,21 @@ def send_shortlist_notification_task(candidate_id: str, candidate_name: str, job
     """
     Sends an email notification to HR when a candidate is auto-shortlisted.
     """
-    if not settings.SMTP_HOST:
-        logger.info(
-            f"[Notify] (Dry Run) Candidate '{candidate_name}' shortlisted for '{job_title}' "
-            f"with score {score:.1f}. Set SMTP_HOST to send real emails."
-        )
-        return {"status": "dry_run_notified"}
-
-    import smtplib
-    from email.mime.text import MIMEText
-    from email.mime.multipart import MIMEMultipart
+    from services.email_service import send_hr_new_candidate_alert
 
     to_email = hr_email or "hr@company.com"
-    subject = f"Candidate Shortlisted: {candidate_name} for {job_title}"
-    body = f"""
-    Hello HR Team,
+    dashboard_url = f"https://sarvam-talent-discovery-hrdashboard.netlify.app/candidates/{candidate_id}"
 
-    A new candidate has been automatically shortlisted by Sarvam Talent Discovery.
-
-    Candidate Name: {candidate_name}
-    Job Role: {job_title}
-    AI Evaluation Score: {score:.1f}/10
-
-    Please review the candidate's full profile and audio screening summary in the HR Dashboard.
-
-    Best regards,
-    Sarvam AI Platform
-    """
-
-    msg = MIMEMultipart()
-    msg['From'] = settings.SMTP_FROM_EMAIL
-    msg['To'] = to_email
-    msg['Subject'] = subject
-    msg.attach(MIMEText(body, 'plain'))
-
-    try:
-        server = smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT)
-        server.starttls()
-        if settings.SMTP_USER and settings.SMTP_PASSWORD:
-            server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
-        server.send_message(msg)
-        server.quit()
-        
+    success = send_hr_new_candidate_alert(
+        hr_email=to_email,
+        candidate_name=candidate_name,
+        job_title=job_title,
+        total_score=score,
+        dashboard_url=dashboard_url,
+    )
+    if success:
         logger.info(f"[Notify] Email sent to {to_email} for candidate '{candidate_name}'")
         return {"status": "email_sent"}
-    except Exception as exc:
-        logger.error(f"[Notify] Failed to send email: {exc}")
-        return {"status": "failed", "error": str(exc)}
+    else:
+        logger.warning(f"[Notify] Email failed or skipped for {to_email}")
+        return {"status": "skipped_or_failed"}

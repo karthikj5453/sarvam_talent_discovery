@@ -1,6 +1,8 @@
 import os
 import time
 import logging
+import contextvars
+import uuid
 from pathlib import Path
 from pythonjsonlogger import jsonlogger
 
@@ -18,14 +20,26 @@ from core.database import engine, Base
 from core import models  # noqa — registers all models with SQLAlchemy
 from api.routes import auth, candidates, jobs, screening, evaluations, dashboard, analytics, whatsapp
 
+# Thread-local/Task-local ContextVar for correlation tracking
+request_id_var = contextvars.ContextVar("request_id", default="")
+
+
+class CorrelationIdFilter(logging.Filter):
+    """Logging filter to inject request_id context variable into log records."""
+    def filter(self, record):
+        record.request_id = request_id_var.get()
+        return True
+
+
 # ─── STRUCTURED JSON LOGGING ──────────────────────────────────
 def _setup_logging():
     handler = logging.StreamHandler()
     formatter = jsonlogger.JsonFormatter(
-        fmt="%(asctime)s %(name)s %(levelname)s %(message)s",
+        fmt="%(asctime)s %(name)s %(levelname)s %(message)s %(request_id)s",
         datefmt="%Y-%m-%dT%H:%M:%S",
     )
     handler.setFormatter(formatter)
+    handler.addFilter(CorrelationIdFilter())
     root = logging.getLogger()
     root.setLevel(logging.INFO)
     # Remove default handlers, add JSON one
@@ -79,6 +93,7 @@ app = FastAPI(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+
 # ─── CORS ─────────────────────────────────────────────────────
 app.add_middleware(
     CORSMiddleware,
@@ -111,6 +126,19 @@ async def log_request_timing(request: Request, call_next):
         },
     )
     return response
+
+
+# ─── CORRELATION ID MIDDLEWARE ────────────────────────────────
+@app.middleware("http")
+async def correlation_id_middleware(request: Request, call_next):
+    request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+    token = request_id_var.set(request_id)
+    try:
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id
+        return response
+    finally:
+        request_id_var.reset(token)
 
 # ─── LOCAL STATIC FILES (dev audio/resume storage) ────────────
 if settings.use_local_storage():

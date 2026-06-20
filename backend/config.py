@@ -64,6 +64,10 @@ class Settings(BaseSettings):
     # ─── Test Database ────────────────────────────────────────────
     TEST_DATABASE_URL: str = "postgresql://postgres:password@127.0.0.1:5432/sarvam_talent_test"
 
+    # ─── Security Flags ───────────────────────────────────────────
+    # If False (default), POST /auth/register requires admin role credentials.
+    ALLOW_PUBLIC_REGISTRATION: bool = False
+
     def use_local_storage(self) -> bool:
         """Returns True if AWS creds are absent/placeholder — use local disk storage."""
         placeholder = {"your_aws_key", "your_aws_secret", "", "your_key", "your_secret"}

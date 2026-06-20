@@ -183,7 +183,43 @@ async def run_evaluation(session_id: uuid.UUID, db: Session) -> Optional[Compete
     db.commit()
     db.refresh(score_row)
     logger.info("[Evaluator] Scored candidate %s: %.2f", candidate.id, total_score)
+
+    # ── 9. Trigger Post-Evaluation Emails (Live on DB commit) ─────
+    _send_post_eval_emails(db, candidate, job, score_row)
+
     return score_row
+
+
+def _send_post_eval_emails(db: Session, candidate: Candidate, job: Optional[Job], score: CompetencyScore) -> None:
+    """Send candidate + HR emails AFTER evaluation completes (score is now real)."""
+    from services import email_service
+    from core.models import User
+    try:
+        job_title = job.title if job else "the position"
+        total_score = score.total_score if score else None
+        dashboard_url = (
+            f"https://sarvam-talent-discovery-hrdashboard.netlify.app/candidates/{candidate.id}"
+        )
+
+        email_service.send_screening_complete(
+            candidate_name=candidate.name,
+            candidate_email=candidate.email,
+            job_title=job_title,
+            total_score=total_score,
+        )
+
+        # Notify all active HR users
+        hr_users = db.query(User).filter(User.is_active == True).all()
+        for hr_user in hr_users:
+            email_service.send_hr_new_candidate_alert(
+                hr_email=hr_user.email,
+                candidate_name=candidate.name or "Unknown",
+                job_title=job_title,
+                total_score=total_score,
+                dashboard_url=dashboard_url,
+            )
+    except Exception as e:
+        logger.warning("[Email] Post-evaluation emails failed: %s", e)
 
 
 # ─── INTERNAL HELPERS ─────────────────────────────────────────
