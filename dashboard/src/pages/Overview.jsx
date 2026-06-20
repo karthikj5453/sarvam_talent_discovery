@@ -53,7 +53,8 @@ export default function Overview() {
       setFunnel(Array.isArray(f) ? f : []);
       setJobs(j);
       setEvaluations(e);
-      setCandidates(c?.items || []);
+      const candidatesList = Array.isArray(c) ? c : (c?.items || []);
+      setCandidates(candidatesList);
     }).catch(console.error)
       .finally(() => setLoading(false));
   }, []);

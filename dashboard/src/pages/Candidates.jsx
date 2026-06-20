@@ -30,8 +30,13 @@ export default function Candidates() {
         jobs.length ? Promise.resolve(jobs) : api.getJobs(),
         api.getMe().catch(() => null),
       ]);
-      setCandidatesWithScores(candResult.items || []);
-      setTotalCount(candResult.total || 0);
+      if (Array.isArray(candResult)) {
+        setCandidatesWithScores(candResult);
+        setTotalCount(candResult.length);
+      } else {
+        setCandidatesWithScores(candResult?.items || []);
+        setTotalCount(candResult?.total || 0);
+      }
       if (!jobs.length) setJobs(jobList);
       setHrUser(user);
     } catch (err) {
