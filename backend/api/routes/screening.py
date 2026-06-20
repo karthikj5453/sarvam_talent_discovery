@@ -28,7 +28,11 @@ ALLOWED_RESUME_MIME = {"application/pdf"}
 # ─── START SCREENING ──────────────────────────────────────────
 
 @router.post("/start", response_model=ScreeningSessionResponse, status_code=status.HTTP_201_CREATED)
-def start_screening(payload: ScreeningStartRequest, db: Session = Depends(get_db)):
+def start_screening(
+    payload: ScreeningStartRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
     """
     Create a new ScreeningSession for a candidate.
     If an incomplete session already exists, resume it.
@@ -67,13 +71,14 @@ def start_screening(payload: ScreeningStartRequest, db: Session = Depends(get_db
         from services import email_service
         job = db.query(Job).filter(Job.id == candidate.job_id).first()
         job_title = job.title if job else "the position"
-        email_service.send_application_received(
+        background_tasks.add_task(
+            email_service.send_application_received,
             candidate_name=candidate.name,
             candidate_email=candidate.email,
             job_title=job_title,
         )
     except Exception as e:
-        logger.warning("[Email] Application received email failed: %s", e)
+        logger.warning("[Email] Failed to schedule application received email: %s", e)
 
     return session
 
