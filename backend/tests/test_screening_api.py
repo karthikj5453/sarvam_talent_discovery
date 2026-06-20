@@ -187,3 +187,40 @@ def test_delete_candidate(client, db_session):
     assert deleted_cand is None
     deleted_sess = db_session.query(ScreeningSession).filter(ScreeningSession.candidate_id == candidate.id).first()
     assert deleted_sess is None
+
+
+def test_get_session_job(client, db_session):
+    # Create Job and Candidate
+    job = Job(
+        title="Engineering Manager",
+        required_skills=["Management"],
+        competency_weights={"ownership_signals": 0.5}
+    )
+    db_session.add(job)
+    db_session.commit()
+    db_session.refresh(job)
+
+    candidate = Candidate(
+        name="Candidate For Job Test",
+        email="job_test@example.com",
+        phone="9876543210",
+        job_id=job.id,
+        status="applied",
+        consent_given=True
+    )
+    db_session.add(candidate)
+    db_session.commit()
+    db_session.refresh(candidate)
+
+    # Create Screening Session
+    session = ScreeningSession(candidate_id=candidate.id)
+    db_session.add(session)
+    db_session.commit()
+    db_session.refresh(session)
+
+    # Fetch job info via secure public endpoint
+    resp = client.get(f"/screening/{session.id}/job")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["title"] == "Engineering Manager"
+    assert "id" in data

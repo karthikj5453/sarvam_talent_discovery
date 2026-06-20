@@ -49,7 +49,7 @@ export default function Interview() {
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
-    // Fetch session details, then determine if it's an engineering role
+    // Fetch session details to load interview questions
     fetch(`${BASE_URL}/screening/${sessionId}`)
       .then(r => r.json())
       .then(data => {
@@ -57,26 +57,21 @@ export default function Interview() {
           ? data.followup_questions.map(q => typeof q === 'string' ? q : q?.question || q)
           : FALLBACK_QUESTIONS;
         setQuestions(qs);
-        
-        // Optional: fetch candidate details to check job title
-        if (data.candidate_id) {
-          fetch(`${BASE_URL}/candidates/${data.candidate_id}`)
-            .then(res => res.json())
-            .then(candData => {
-              if (candData && candData.candidate && candData.candidate.job_id) {
-                 fetch(`${BASE_URL}/jobs`)
-                   .then(jRes => jRes.json())
-                   .then(jobs => {
-                     const job = jobs.find(j => j.id === candData.candidate.job_id);
-                     if (job && (job.title.toLowerCase().includes('engineer') || job.title.toLowerCase().includes('developer'))) {
-                       setIsEngineering(true);
-                     }
-                   }).catch(e => console.error(e));
-              }
-            }).catch(e => console.error(e));
-        }
       })
       .catch(() => setQuestions(FALLBACK_QUESTIONS));
+
+    // Fetch associated job details to determine if sandbox is needed (engineering role)
+    fetch(`${BASE_URL}/screening/${sessionId}/job`)
+      .then(res => res.json())
+      .then(job => {
+        if (job && job.title) {
+          const titleLower = job.title.toLowerCase();
+          if (titleLower.includes('engineer') || titleLower.includes('developer') || titleLower.includes('architect')) {
+            setIsEngineering(true);
+          }
+        }
+      })
+      .catch(e => console.error('Failed to load job details for session:', e));
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);

@@ -429,3 +429,28 @@ async def complete_screening(
         background_tasks.add_task(_run_eval_bg, session.id, session.candidate_id)
 
     return session
+
+
+# ─── SECURE PUBLIC ROUTE TO FETCH JOB OF AN ACTIVE SESSION ───
+@router.get("/{session_id}/job", status_code=status.HTTP_200_OK)
+def get_session_job(session_id: UUID, db: Session = Depends(get_db)):
+    """
+    Public route: Returns the job details of a screening session.
+    Used by the candidate interview portal to determine if the role requires technical sandbox support.
+    Requires no authentication because the valid session_id acts as a proof of authority.
+    """
+    session = db.query(ScreeningSession).filter(ScreeningSession.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Screening session not found")
+    candidate = db.query(Candidate).filter(Candidate.id == session.candidate_id).first()
+    if not candidate:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+    job = db.query(Job).filter(Job.id == candidate.job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {
+        "id": str(job.id),
+        "title": job.title,
+        "department": job.department,
+        "required_skills": job.required_skills,
+    }
