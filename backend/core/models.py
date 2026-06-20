@@ -1,5 +1,5 @@
 import uuid
-from sqlalchemy import Column, String, Boolean, Float, Integer, Text, TIMESTAMP, ForeignKey
+from sqlalchemy import Column, String, Boolean, Float, Integer, Text, TIMESTAMP, ForeignKey, Index
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.sql import func
 from core.database import Base
@@ -15,6 +15,7 @@ class User(Base):
     role = Column(String(50), default="hr")   # hr | admin
     is_active = Column(Boolean, default=True)
     created_at = Column(TIMESTAMP, server_default=func.now())
+    updated_at = Column(TIMESTAMP, onupdate=func.now())
 
 
 class Job(Base):
@@ -28,7 +29,11 @@ class Job(Base):
     required_skills = Column(JSONB)        # ["LangGraph", "RAG", "Python"]
     competency_weights = Column(JSONB)     # {"technical_depth": 0.3, ...}
     is_active = Column(Boolean, default=True)
+    # Soft-delete metadata
+    deactivated_at = Column(TIMESTAMP, nullable=True)
+    deactivated_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
     created_at = Column(TIMESTAMP, server_default=func.now())
+    updated_at = Column(TIMESTAMP, onupdate=func.now())
 
 
 class Candidate(Base):
@@ -36,24 +41,30 @@ class Candidate(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String(255))
-    email = Column(String(255), unique=True)
+    email = Column(String(255))            # NOT unique globally — one person can apply to many jobs
     phone = Column(String(20))
-    job_id = Column(UUID(as_uuid=True), ForeignKey("jobs.id"))
+    job_id = Column(UUID(as_uuid=True), ForeignKey("jobs.id"), index=True)
     resume_url = Column(Text)
-    resume_text = Column(Text)          # extracted plain-text from PDF (via PyMuPDF)
+    resume_text = Column(Text)            # extracted plain-text from PDF (via PyMuPDF)
     github_url = Column(String(255))
     detected_language = Column(String(50))
-    status = Column(String(50), default="applied")
-    # applied → screened → shortlisted → interviewing → offered → rejected
+    status = Column(String(50), default="applied", index=True)
+    # applied -> screened -> shortlisted -> interviewing -> offered -> rejected
+    consent_given = Column(Boolean, default=False)
     created_at = Column(TIMESTAMP, server_default=func.now())
+    updated_at = Column(TIMESTAMP, onupdate=func.now())
 
+    # Composite unique: one application per (email, job) — same person can apply to different jobs
+    __table_args__ = (
+        Index("ix_candidates_email_job_id", "email", "job_id", unique=True),
+    )
 
 
 class ScreeningSession(Base):
     __tablename__ = "screening_sessions"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    candidate_id = Column(UUID(as_uuid=True), ForeignKey("candidates.id"))
+    candidate_id = Column(UUID(as_uuid=True), ForeignKey("candidates.id"), index=True)
     intro_audio_url = Column(Text)
     intro_transcript = Column(Text)
     intro_language = Column(String(50))
@@ -63,13 +74,14 @@ class ScreeningSession(Base):
     total_duration_seconds = Column(Integer)
     completed_at = Column(TIMESTAMP)
     created_at = Column(TIMESTAMP, server_default=func.now())
+    updated_at = Column(TIMESTAMP, onupdate=func.now())
 
 
 class CompetencyScore(Base):
     __tablename__ = "competency_scores"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    candidate_id = Column(UUID(as_uuid=True), ForeignKey("candidates.id"))
+    candidate_id = Column(UUID(as_uuid=True), ForeignKey("candidates.id"), index=True)
     session_id = Column(UUID(as_uuid=True), ForeignKey("screening_sessions.id"))
     technical_depth = Column(Float)
     first_principles = Column(Float)
@@ -78,13 +90,14 @@ class CompetencyScore(Base):
     curiosity_depth = Column(Float)
     multilingual_fluency = Column(Float)
     eq_score = Column(Float)
-    total_score = Column(Float)
-    justifications = Column(JSONB)         # {"technical_depth": "reason..."}
-    flags = Column(JSONB)                  # ["low_shipping_velocity", ...]
+    total_score = Column(Float, index=True)    # index for ORDER BY total_score DESC
+    justifications = Column(JSONB)             # {"technical_depth": "reason..."}
+    flags = Column(JSONB)                      # ["low_shipping_velocity", ...]
     hr_summary = Column(Text)
     hr_summary_audio_url = Column(Text)
     raw_105b_response = Column(JSONB)
     created_at = Column(TIMESTAMP, server_default=func.now())
+    updated_at = Column(TIMESTAMP, onupdate=func.now())
 
 
 class AnalyticsEvent(Base):

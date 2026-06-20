@@ -7,6 +7,7 @@ import Jobs from './pages/Jobs';
 import Candidates from './pages/Candidates';
 import CandidateDetails from './pages/CandidateDetails';
 import ThemeToggle from './components/ThemeToggle';
+import ErrorBoundary from './components/ErrorBoundary';
 
 // Simple Route Guard to protect HR pages
 function ProtectedRoute({ children }) {
@@ -25,19 +26,21 @@ function ProtectedRoute({ children }) {
 export default function App() {
   return (
     <Router>
-      <Routes>
-        {/* Public Routes */}
-        <Route path="/login" element={<Login />} />
+      <ErrorBoundary>
+        <Routes>
+          {/* Public Routes */}
+          <Route path="/login" element={<Login />} />
 
-        {/* Protected Dashboard Routes */}
-        <Route path="/" element={<ProtectedRoute><Overview /></ProtectedRoute>} />
-        <Route path="/jobs" element={<ProtectedRoute><Jobs /></ProtectedRoute>} />
-        <Route path="/candidates" element={<ProtectedRoute><Candidates /></ProtectedRoute>} />
-        <Route path="/candidates/:candidateId" element={<ProtectedRoute><CandidateDetails /></ProtectedRoute>} />
+          {/* Protected Dashboard Routes */}
+          <Route path="/" element={<ProtectedRoute><Overview /></ProtectedRoute>} />
+          <Route path="/jobs" element={<ProtectedRoute><Jobs /></ProtectedRoute>} />
+          <Route path="/candidates" element={<ProtectedRoute><Candidates /></ProtectedRoute>} />
+          <Route path="/candidates/:candidateId" element={<ProtectedRoute><CandidateDetails /></ProtectedRoute>} />
 
-        {/* Fallback */}
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+          {/* Fallback */}
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </ErrorBoundary>
     </Router>
   );
 }

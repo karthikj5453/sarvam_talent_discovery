@@ -6,7 +6,7 @@ from uuid import UUID
 from core.database import get_db
 from core.models import Candidate, ScreeningSession, CompetencyScore
 from core.schemas import CompetencyScoreResponse
-from api.routes.auth import get_current_user
+from api.dependencies import get_current_user
 from core.models import User
 
 router = APIRouter()

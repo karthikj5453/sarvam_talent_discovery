@@ -4,26 +4,9 @@ from sqlalchemy.orm import Session
 from core.database import get_db
 from core.models import User
 from core.schemas import UserCreate, UserResponse, Token
-from core.security import hash_password, verify_password, create_access_token, decode_access_token
+from core.security import hash_password, verify_password, create_access_token
 
 router = APIRouter()
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
-
-
-# ─── DEPENDENCY: get current user from JWT ─────────────────────
-
-def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
-    email = decode_access_token(token)
-    if not email:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    user = db.query(User).filter(User.email == email).first()
-    if not user or not user.is_active:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
-    return user
 
 
 # ─── REGISTER ──────────────────────────────────────────────────
@@ -66,6 +49,9 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
 # ─── ME ────────────────────────────────────────────────────────
 
 @router.get("/me", response_model=UserResponse)
-def get_me(current_user: User = Depends(get_current_user)):
+def get_me(current_user: User = Depends(
+    # Import here to avoid circular import — use the central dependency
+    __import__("api.dependencies", fromlist=["get_current_user"]).get_current_user
+)):
     """Return the currently authenticated user's profile."""
     return current_user

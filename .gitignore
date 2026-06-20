@@ -63,3 +63,7 @@ postgres_data/
 # ─── Build artifacts ─────────────────────────────────────────
 *.pyc
 *.pyo
+
+# ─── Local dev media ─────────────────────────────────────────
+backend/local_audio/
+

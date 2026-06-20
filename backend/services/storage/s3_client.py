@@ -8,6 +8,8 @@ In development (when AWS creds are absent/placeholder):
 
 In production (when real AWS creds are set):
   - Files go to S3 with presigned URLs
+
+Performance: S3 client is a module-level singleton (not re-created per call).
 """
 import io
 import os
@@ -22,6 +24,25 @@ from config import settings
 
 logger = logging.getLogger(__name__)
 
+# ─── SINGLETON S3 CLIENT ──────────────────────────────────────
+# boto3.client() involves SSL handshake — cache it at module level.
+_s3_client = None
+
+
+def _get_s3_client():
+    """Return a cached S3 client. Created once on first call."""
+    global _s3_client
+    if _s3_client is None:
+        _s3_client = boto3.client(
+            "s3",
+            aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+            region_name=settings.AWS_REGION,
+            config=Config(signature_version="s3v4"),
+        )
+    return _s3_client
+
+
 # ─── HELPERS ──────────────────────────────────────────────────
 
 def _use_local() -> bool:
@@ -34,16 +55,6 @@ def _local_base() -> Path:
     path = Path(settings.LOCAL_STORAGE_PATH)
     path.mkdir(parents=True, exist_ok=True)
     return path
-
-
-def _get_s3_client():
-    return boto3.client(
-        "s3",
-        aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-        aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-        region_name=settings.AWS_REGION,
-        config=Config(signature_version="s3v4"),
-    )
 
 
 # ─── UPLOAD ───────────────────────────────────────────────────
@@ -75,7 +86,7 @@ def upload_file(
         dest = _local_base() / key
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(file_bytes)
-        logger.debug(f"[Storage] Saved locally: {dest}")
+        logger.debug("[Storage] Saved locally: %s", dest)
         return key
 
     # ── S3 path ───────────────────────────────────────────────
@@ -86,7 +97,7 @@ def upload_file(
         Body=file_bytes,
         ContentType=content_type,
     )
-    logger.debug(f"[Storage] Uploaded to S3: {key}")
+    logger.debug("[Storage] Uploaded to S3: %s", key)
     return key
 
 
@@ -159,12 +170,48 @@ def download_file(key: str) -> bytes:
 # ─── DELETE ───────────────────────────────────────────────────
 
 def delete_file(key: str) -> None:
-    """Delete a file from S3 or local disk."""
+    """
+    Delete a file from S3 or local disk.
+    Used by GDPR erase to remove actual audio/PDF bytes, not just DB references.
+    """
+    if not key:
+        return
     if _use_local():
         dest = _local_base() / key
         if dest.exists():
             dest.unlink()
+            logger.info("[Storage] Deleted local file: %s", key)
         return
 
-    s3 = _get_s3_client()
-    s3.delete_object(Bucket=settings.AWS_BUCKET_NAME, Key=key)
+    try:
+        s3 = _get_s3_client()
+        s3.delete_object(Bucket=settings.AWS_BUCKET_NAME, Key=key)
+        logger.info("[Storage] Deleted S3 object: %s", key)
+    except ClientError as e:
+        logger.warning("[Storage] Failed to delete S3 object %s: %s", key, e)
+
+
+def url_to_key(url: str) -> Optional[str]:
+    """
+    Convert a stored URL back to a storage key for deletion.
+    Local: /static/audio/audio/file.wav  → audio/file.wav
+    S3 presigned: strips query params, extracts key from path.
+    """
+    if not url:
+        return None
+    # Local static URL
+    prefix = "/static/audio/"
+    if url.startswith(prefix):
+        return url[len(prefix):]
+    # S3 presigned URL or s3:// protocol
+    if url.startswith("s3://"):
+        # s3://bucket/key
+        return "/".join(url.split("/")[3:])
+    # HTTPS presigned: https://bucket.s3.region.amazonaws.com/key?...
+    try:
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        # path starts with /key
+        return parsed.path.lstrip("/")
+    except Exception:
+        return None

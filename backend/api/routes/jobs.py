@@ -6,7 +6,7 @@ from uuid import UUID
 from core.database import get_db
 from core.models import Job
 from core.schemas import JobCreate, JobUpdate, JobResponse
-from api.routes.auth import get_current_user
+from api.dependencies import get_current_user
 from core.models import User
 
 router = APIRouter()
@@ -110,5 +110,8 @@ def delete_job(
     job = db.query(Job).filter(Job.id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    from datetime import datetime, timezone
     job.is_active = False
+    job.deactivated_at = datetime.now(timezone.utc)
+    job.deactivated_by = current_user.id
     db.commit()

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, BackgroundTasks, Request
 from sqlalchemy.orm import Session
 from typing import Optional
 from uuid import UUID
@@ -10,17 +10,19 @@ from core.models import Candidate, Job, ScreeningSession, CompetencyScore
 from core.schemas import (
     ScreeningStartRequest,
     ScreeningSessionResponse,
-    ScreeningUploadIntroRequest,
-    ScreeningUploadAnswerRequest,
 )
 from services.sarvam.sarvam_client import transcribe_and_translate, SarvamError
 from services.storage.s3_client import upload_audio, upload_resume as s3_upload_resume, key_to_url
-from services import email_service
 from config import settings
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# ─── FILE SIZE LIMITS ─────────────────────────────────────────
+MAX_AUDIO_BYTES = 25 * 1024 * 1024    # 25 MB hard cap for audio
+MAX_RESUME_BYTES = 10 * 1024 * 1024   # 10 MB hard cap for PDF
+ALLOWED_RESUME_MIME = {"application/pdf"}
 
 
 # ─── START SCREENING ──────────────────────────────────────────
@@ -30,10 +32,19 @@ def start_screening(payload: ScreeningStartRequest, db: Session = Depends(get_db
     """
     Create a new ScreeningSession for a candidate.
     If an incomplete session already exists, resume it.
+    Requires candidate.consent_given == True (DPDP Act compliance).
     """
     candidate = db.query(Candidate).filter(Candidate.id == payload.candidate_id).first()
     if not candidate:
         raise HTTPException(status_code=404, detail="Candidate not found")
+
+    # ── DPDP / GDPR: require explicit consent before storing voice data ─
+    if not candidate.consent_given:
+        raise HTTPException(
+            status_code=403,
+            detail="Candidate has not given consent for data processing. "
+                   "Consent must be recorded before screening can begin.",
+        )
 
     existing = (
         db.query(ScreeningSession)
@@ -53,6 +64,7 @@ def start_screening(payload: ScreeningStartRequest, db: Session = Depends(get_db
 
     # ── Send application confirmation email to candidate ──────
     try:
+        from services import email_service
         job = db.query(Job).filter(Job.id == candidate.job_id).first()
         job_title = job.title if job else "the position"
         email_service.send_application_received(
@@ -61,7 +73,7 @@ def start_screening(payload: ScreeningStartRequest, db: Session = Depends(get_db
             job_title=job_title,
         )
     except Exception as e:
-        logger.warning(f"[Email] Application received email failed: {e}")
+        logger.warning("[Email] Application received email failed: %s", e)
 
     return session
 
@@ -87,7 +99,7 @@ async def upload_resume(
 ):
     """
     Upload a resume. Accepts either:
-      - A direct file upload (PDF) → uploads to S3/local automatically
+      - A direct file upload (PDF only, max 10 MB)
       - A pre-uploaded URL string (if client uploaded directly to S3)
     """
     candidate = db.query(Candidate).filter(Candidate.id == candidate_id).first()
@@ -98,12 +110,26 @@ async def upload_resume(
     file_bytes = None
 
     if file and not resume_url:
+        # ── File type validation ───────────────────────────────
+        if file.content_type not in ALLOWED_RESUME_MIME:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid file type '{file.content_type}'. Only PDF files are accepted.",
+            )
+
+        # ── File size validation (read with a cap) ─────────────
+        file_bytes = await file.read(MAX_RESUME_BYTES + 1)
+        if len(file_bytes) > MAX_RESUME_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail="Resume must be under 10 MB.",
+            )
+
         try:
-            file_bytes = await file.read()
             s3_key = s3_upload_resume(file_bytes, str(candidate_id))
             final_url = key_to_url(s3_key)
         except Exception as e:
-            logger.warning(f"[Screening] Resume upload failed: {e} — skipping resume URL")
+            logger.warning("[Screening] Resume upload failed: %s -- skipping resume URL", e)
             final_url = None
 
     if final_url:
@@ -117,9 +143,9 @@ async def upload_resume(
                 resume_text = "\n".join(page.get_text() for page in doc).strip()
             if resume_text:
                 candidate.resume_text = resume_text[:10000]  # cap at 10k chars
-                logger.info(f"[Screening] Extracted {len(resume_text)} chars from resume PDF")
+                logger.info("[Screening] Extracted %d chars from resume PDF", len(resume_text))
         except Exception as e:
-            logger.warning(f"[Screening] PDF text extraction failed: {e}")
+            logger.warning("[Screening] PDF text extraction failed: %s", e)
 
     db.commit()
     return {"status": "ok", "resume_url": final_url}
@@ -139,8 +165,8 @@ async def upload_intro(
     Process the candidate's intro audio.
 
     Two modes:
-    1. Send raw audio file → Sarvam STT runs automatically
-    2. Send pre-computed transcript text → stored directly
+    1. Send raw audio file -> Sarvam STT runs automatically
+    2. Send pre-computed transcript text -> stored directly
 
     After saving the transcript, automatically generates AI follow-up
     questions using Gemini and stores them in session.followup_questions.
@@ -153,9 +179,15 @@ async def upload_intro(
     final_language = detected_language
     intro_audio_url = None
 
-    # ── Case 1: Raw audio → call Sarvam STT ──────────────────
+    # ── Case 1: Raw audio -> call Sarvam STT ──────────────────
     if file and not transcript:
-        audio_bytes = await file.read()
+        # ── Audio size validation ──────────────────────────────
+        audio_bytes = await file.read(MAX_AUDIO_BYTES + 1)
+        if len(audio_bytes) > MAX_AUDIO_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail="Audio file must be under 25 MB. Please record a shorter introduction.",
+            )
 
         # Upload to storage for record-keeping
         try:
@@ -163,19 +195,29 @@ async def upload_intro(
             intro_audio_url = key_to_url(s3_key)
             session.intro_audio_url = intro_audio_url
         except Exception as e:
-            logger.warning(f"[Screening] Audio upload failed: {e}")
+            logger.warning("[Screening] Audio upload failed: %s", e)
+
+        # ── Detect MIME type from magic bytes ─────────────────
+        fname = _detect_audio_filename(audio_bytes, file.filename)
 
         # Call Sarvam STT + Translate
         try:
             result = await transcribe_and_translate(
                 audio_bytes=audio_bytes,
-                filename=file.filename or "intro.wav",
+                filename=fname,
             )
             final_transcript = result.get("transcript", "")
             final_language = result.get("language_code", "unknown")
-            logger.info(f"[Screening] STT result: lang={final_language}, chars={len(final_transcript)}")
+
+            # Validate transcript is not empty/too short
+            if len((final_transcript or "").strip()) < 20:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Audio was too short or inaudible. Please re-record and speak clearly for at least 5 seconds.",
+                )
+            logger.info("[Screening] STT result: lang=%s, chars=%d", final_language, len(final_transcript))
         except SarvamError as e:
-            logger.error(f"[Screening] Sarvam STT failed: {e}")
+            logger.error("[Screening] Sarvam STT failed: %s", e)
             raise HTTPException(status_code=502, detail=f"Sarvam STT failed: {e.detail}")
 
     # ── Save transcript ────────────────────────────────────────
@@ -204,15 +246,40 @@ async def upload_intro(
                 n=3,
             )
             session.followup_questions = questions
-            logger.info(f"[Screening] Generated {len(questions)} follow-up questions via Gemini")
+            logger.info("[Screening] Generated %d follow-up questions via Gemini", len(questions))
         except Exception as e:
             # Don't fail the whole intro upload if question generation fails
-            logger.warning(f"[Screening] Follow-up question generation failed: {e}")
+            logger.warning("[Screening] Follow-up question generation failed: %s", e)
             session.followup_questions = _default_questions()
 
     db.commit()
     db.refresh(session)
     return session
+
+
+def _detect_audio_filename(audio_bytes: bytes, original_filename: Optional[str]) -> str:
+    """
+    Detect audio format from magic bytes.
+    Supports: WebM, Ogg, MP3, M4A/AAC, WAV (default fallback).
+    """
+    if len(audio_bytes) < 4:
+        return original_filename or "audio.wav"
+
+    header = audio_bytes[:12]
+
+    if header[:4] == b'\x1aE\xdf\xa3':
+        return "audio.webm"
+    if header[:4] == b'OggS':
+        return "audio.ogg"
+    if header[:3] == b'ID3' or header[:2] == b'\xff\xfb' or header[:2] == b'\xff\xf3':
+        return "audio.mp3"
+    if header[4:8] == b'ftyp':  # M4A / AAC container
+        return "audio.m4a"
+    if header[:4] == b'RIFF' and header[8:12] == b'WAVE':
+        return "audio.wav"
+
+    # Fall back to original filename hint or WAV
+    return original_filename or "audio.wav"
 
 
 def _default_questions() -> list:
@@ -237,7 +304,7 @@ async def upload_answer(
     """
     Process one follow-up answer audio.
     question_index is 0-based, matching the followup_questions array.
-    Like upload-intro: accepts raw audio (→ Sarvam STT) or pre-computed transcript.
+    Like upload-intro: accepts raw audio (-> Sarvam STT) or pre-computed transcript.
     """
     session = db.query(ScreeningSession).filter(ScreeningSession.id == session_id).first()
     if not session:
@@ -246,27 +313,34 @@ async def upload_answer(
     final_transcript = transcript
     answer_audio_url = None
 
-    # ── Case 1: Raw audio → Sarvam STT ───────────────────────
+    # ── Case 1: Raw audio -> Sarvam STT ───────────────────────
     if file and not transcript:
-        audio_bytes = await file.read()
+        # ── Audio size validation ──────────────────────────────
+        audio_bytes = await file.read(MAX_AUDIO_BYTES + 1)
+        if len(audio_bytes) > MAX_AUDIO_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail="Audio file must be under 25 MB.",
+            )
 
         try:
             s3_key = upload_audio(audio_bytes, str(session.candidate_id), label=f"answer_{question_index}")
             answer_audio_url = key_to_url(s3_key)
         except Exception as e:
-            logger.warning(f"[Screening] S3 answer upload failed: {e}")
+            logger.warning("[Screening] S3 answer upload failed: %s", e)
 
         try:
+            fname = _detect_audio_filename(audio_bytes, file.filename)
             result = await transcribe_and_translate(
                 audio_bytes=audio_bytes,
-                filename=file.filename or "answer.wav",
+                filename=fname,
             )
             final_transcript = result.get("transcript", "")
         except SarvamError as e:
-            logger.error(f"[Screening] Sarvam STT (answer) failed: {e}")
+            logger.error("[Screening] Sarvam STT (answer) failed: %s", e)
             raise HTTPException(status_code=502, detail=f"Sarvam STT failed: {e.detail}")
 
-    # ── Update answers list ───────────────────────────────────
+    # ── Update answers list ────────────────────────────────────
     answers: list = list(session.followup_answers or [])
     while len(answers) <= question_index:
         answers.append({})
@@ -284,18 +358,22 @@ async def upload_answer(
 
 # ─── COMPLETE SCREENING ───────────────────────────────────────
 
-@router.post("/complete", response_model=ScreeningSessionResponse)
+@router.post("/complete/{session_id}", response_model=ScreeningSessionResponse)
 async def complete_screening(
-    session_id: UUID,
+    session_id: UUID,                         # FIX: now a proper path param
+    background_tasks: BackgroundTasks,
     proctoring_flags: Optional[dict] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
-    Mark the session complete → update candidate status → fire AI evaluation.
+    Mark the session complete -> update candidate status -> fire AI evaluation.
 
     Evaluation mode (set via ASYNC_EVAL in .env):
-      - ASYNC_EVAL=false (default): runs evaluation synchronously before returning.
-      - ASYNC_EVAL=true:            queues a Celery background task and returns immediately.
+      - ASYNC_EVAL=false (default): runs evaluation in background after response.
+      - ASYNC_EVAL=true:            queues a Celery task and returns immediately.
+
+    Emails (candidate + all HR users) are sent INSIDE the background task,
+    AFTER evaluation is complete, so the score is always available.
     """
     session = db.query(ScreeningSession).filter(ScreeningSession.id == session_id).first()
     if not session:
@@ -314,46 +392,54 @@ async def complete_screening(
     db.commit()
     db.refresh(session)
 
-    # ── Fire evaluation ───────────────────────────────────────
+    # ── Fire evaluation in background (non-blocking) ──────────
+    async def _run_eval_bg(sid, candidate_id):
+        """Background evaluation + post-eval emails — runs after /complete returned."""
+        from core.database import SessionLocal
+        bg_db = SessionLocal()
+        try:
+            from services.pipeline.evaluator import run_evaluation
+            score = await run_evaluation(sid, bg_db)
+
+            if score:
+                logger.info("[Screening] BG evaluation done, score=%.2f", score.total_score,
+                            extra={"session_id": str(sid)})
+                # ── Send emails NOW that we have a real score ─────────
+                _send_post_eval_emails(bg_db, candidate_id, score)
+            else:
+                logger.warning("[Screening] BG evaluation returned None",
+                               extra={"session_id": str(sid)})
+        except Exception as e:
+            logger.error("[Screening] BG evaluation error: %s", e, exc_info=True)
+        finally:
+            bg_db.close()
+
     if settings.ASYNC_EVAL:
-        # Production: Celery background task
         try:
             from services.background.tasks import evaluate_candidate_task
             evaluate_candidate_task.delay(str(session_id))
-            logger.info(f"[Screening] Evaluation task queued for session {session_id}")
+            logger.info("[Screening] Celery task queued", extra={"session_id": str(session_id)})
         except Exception as e:
-            logger.warning(f"[Screening] Could not queue evaluation task: {e}")
+            logger.warning("[Screening] Celery unavailable, falling back to BG task: %s", e)
+            background_tasks.add_task(_run_eval_bg, session.id, session.candidate_id)
     else:
-        # Dev mode: run synchronously
-        try:
-            from services.pipeline.evaluator import run_evaluation
-            logger.info(f"[Screening] Running evaluation synchronously for session {session_id}")
-            score = await run_evaluation(session.id, db)
-            if score:
-                logger.info(f"[Screening] Evaluation complete — score: {score.total_score}")
-            else:
-                logger.warning(f"[Screening] Evaluation returned None for session {session_id}")
-        except Exception as e:
-            # Don't fail the /complete endpoint if evaluation crashes
-            logger.error(f"[Screening] Evaluation error: {e}", exc_info=True)
+        background_tasks.add_task(_run_eval_bg, session.id, session.candidate_id)
 
-    # Refresh session after evaluation may have updated candidate status
-    db.refresh(session)
+    return session
 
-    # ── Send completion emails ─────────────────────────────────
+
+def _send_post_eval_emails(db, candidate_id, score) -> None:
+    """Send candidate + HR emails AFTER evaluation completes (score is now real)."""
+    from services import email_service
+    from core.models import User, Candidate, Job
     try:
-        candidate = db.query(Candidate).filter(Candidate.id == session.candidate_id).first()
+        candidate = db.query(Candidate).filter(Candidate.id == candidate_id).first()
         job = db.query(Job).filter(Job.id == candidate.job_id).first() if candidate else None
-        from core.models import CompetencyScore
-        score = (
-            db.query(CompetencyScore)
-            .filter(CompetencyScore.candidate_id == session.candidate_id)
-            .order_by(CompetencyScore.created_at.desc())
-            .first()
-        )
-        total_score = score.total_score if score else None
         job_title = job.title if job else "the position"
-        dashboard_url = f"https://sarvam-talent-discovery-hrdashboard.netlify.app/candidates/{candidate.id}" if candidate else ""
+        total_score = score.total_score if score else None
+        dashboard_url = (
+            f"https://sarvam-talent-discovery-hrdashboard.netlify.app/candidates/{candidate_id}"
+        )
 
         if candidate:
             email_service.send_screening_complete(
@@ -362,8 +448,8 @@ async def complete_screening(
                 job_title=job_title,
                 total_score=total_score,
             )
-        # Notify all HR users
-        from core.models import User
+
+        # Notify all active HR users
         hr_users = db.query(User).filter(User.is_active == True).all()
         for hr_user in hr_users:
             email_service.send_hr_new_candidate_alert(
@@ -374,6 +460,4 @@ async def complete_screening(
                 dashboard_url=dashboard_url,
             )
     except Exception as e:
-        logger.warning(f"[Email] Post-screening emails failed: {e}")
-
-    return session
+        logger.warning("[Email] Post-evaluation emails failed: %s", e)

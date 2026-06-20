@@ -10,7 +10,7 @@ from core.schemas import (
     CandidateResponse, CandidateStatusUpdate, CandidateWithScore,
     CompetencyScoreResponse, DashboardPipelineResponse, PipelineStageSummary,
 )
-from api.routes.auth import get_current_user
+from api.dependencies import get_current_user
 from core.models import User
 
 router = APIRouter()
@@ -58,7 +58,7 @@ def get_candidates(
 ):
     """
     Return candidates enriched with their latest competency score.
-    Ordered by total_score descending (scored candidates first).
+    FIX: Uses a single bulk query for all scores instead of N+1 queries.
     """
     q = db.query(Candidate)
     if job_id:
@@ -68,21 +68,32 @@ def get_candidates(
 
     candidates = q.order_by(Candidate.created_at.desc()).offset(skip).limit(limit).all()
 
-    results = []
-    for c in candidates:
-        score = (
+    # ── Bulk-fetch scores in ONE query (eliminates N+1) ───────
+    candidate_ids = [c.id for c in candidates]
+    if candidate_ids:
+        # Subquery: latest score per candidate using a window function approach
+        # Simpler: fetch all scores for these IDs, keep only the latest per candidate
+        all_scores = (
             db.query(CompetencyScore)
-            .filter(CompetencyScore.candidate_id == c.id)
-            .order_by(CompetencyScore.created_at.desc())
-            .first()
+            .filter(CompetencyScore.candidate_id.in_(candidate_ids))
+            .order_by(CompetencyScore.candidate_id, CompetencyScore.created_at.desc())
+            .all()
         )
-        results.append(
-            CandidateWithScore(
-                candidate=CandidateResponse.model_validate(c),
-                score=CompetencyScoreResponse.model_validate(score) if score else None,
-            )
+        # Keep first (latest) score per candidate
+        scores_map: dict = {}
+        for s in all_scores:
+            if s.candidate_id not in scores_map:
+                scores_map[s.candidate_id] = s
+    else:
+        scores_map = {}
+
+    return [
+        CandidateWithScore(
+            candidate=CandidateResponse.model_validate(c),
+            score=CompetencyScoreResponse.model_validate(scores_map[c.id]) if c.id in scores_map else None,
         )
-    return results
+        for c in candidates
+    ]
 
 
 # ─── UPDATE STATUS (DRAG & DROP in Kanban) ────────────────────
@@ -134,12 +145,18 @@ def get_top_candidates(
         .all()
     )
 
+    # ── Bulk-fetch candidates for these scores (eliminates N+1) ─
+    candidate_ids = [s.candidate_id for s in scores]
+    candidates_map = {
+        c.id: c for c in
+        db.query(Candidate).filter(Candidate.id.in_(candidate_ids)).all()
+    } if candidate_ids else {}
+
     return [
         CandidateWithScore(
-            candidate=CandidateResponse.model_validate(
-                db.query(Candidate).filter(Candidate.id == s.candidate_id).first()
-            ),
+            candidate=CandidateResponse.model_validate(candidates_map[s.candidate_id]),
             score=CompetencyScoreResponse.model_validate(s),
         )
         for s in scores
+        if s.candidate_id in candidates_map
     ]

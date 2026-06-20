@@ -34,7 +34,8 @@ def test_screening_api_flow(client, db_session):
         email="preeti@example.com",
         phone="9876500000",
         job_id=job.id,
-        status="applied"
+        status="applied",
+        consent_given=True
     )
     db_session.add(candidate)
     db_session.commit()
@@ -74,7 +75,7 @@ def test_screening_api_flow(client, db_session):
     assert answers[0]["transcript"] == "I designed a modular design system that reduced CSS size by 40%."
 
     # 5. Test /screening/complete
-    complete_resp = client.post(f"/screening/complete?session_id={session_id}")
+    complete_resp = client.post(f"/screening/complete/{session_id}")
     assert complete_resp.status_code == 200
     assert complete_resp.json()["completed_at"] is not None
 

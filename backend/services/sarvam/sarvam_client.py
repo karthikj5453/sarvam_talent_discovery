@@ -3,15 +3,29 @@ Sarvam AI API Client
 Wraps: STT, STT-Translate, TTS, and Translate endpoints.
 Auth: api-subscription-key header.
 All methods are async and use httpx.
+
+Retry policy: 3 attempts with exponential backoff (1s, 2s, 4s)
+on transient network/server errors.
 """
 import io
+import logging
 import httpx
 from typing import Optional
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from config import settings
+
+logger = logging.getLogger(__name__)
 
 BASE_URL = settings.SARVAM_BASE_URL.rstrip("/")
 HEADERS = {"api-subscription-key": settings.SARVAM_API_KEY}
 TIMEOUT = 60.0  # seconds
+
+_RETRY = dict(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=1, max=8),
+    retry=retry_if_exception_type((httpx.NetworkError, httpx.TimeoutException)),
+    reraise=True,
+)
 
 
 class SarvamError(Exception):
@@ -33,6 +47,7 @@ def _raise_for_status(response: httpx.Response) -> None:
 
 # ─── SPEECH TO TEXT ───────────────────────────────────────────
 
+@retry(**_RETRY)
 async def transcribe_audio(
     audio_bytes: bytes,
     filename: str = "audio.wav",

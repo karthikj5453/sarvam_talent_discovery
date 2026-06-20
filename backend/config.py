@@ -1,5 +1,6 @@
 from pydantic_settings import BaseSettings
 from typing import List
+import sys
 
 
 class Settings(BaseSettings):
@@ -49,12 +50,19 @@ class Settings(BaseSettings):
         "https://sarvam-talent-discovery-hrdashboard.netlify.app"
     ]
 
+    # ─── Observability ───────────────────────────────────────
+    SENTRY_DSN: str = ""
+
     # ─── SMTP Email Notifications ─────────────────────────────────
     SMTP_HOST: str = ""
-    SMTP_PORT: int = 587
+    SMTP_PORT: int = 465          # 465 = SMTP_SSL (enforced TLS). Use 587 for STARTTLS.
     SMTP_USER: str = ""
     SMTP_PASSWORD: str = ""
     SMTP_FROM_EMAIL: str = "noreply@sarvam.ai"
+    SMTP_USE_SSL: bool = True     # True=SMTP_SSL (port 465), False=STARTTLS (port 587)
+
+    # ─── Test Database ────────────────────────────────────────────
+    TEST_DATABASE_URL: str = "postgresql://postgres:password@127.0.0.1:5432/sarvam_talent_test"
 
     def use_local_storage(self) -> bool:
         """Returns True if AWS creds are absent/placeholder — use local disk storage."""
@@ -70,3 +78,20 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+# ─── SECRET KEY STRENGTH GUARD ─────────────────────────────────
+# Unconditional — always enforced regardless of APP_ENV.
+# Weak keys in staging are just as dangerous as in production.
+_WEAK_KEYS = {"change_me_in_production", "secret", "password", "test", "dev", ""}
+if settings.SECRET_KEY.lower() in _WEAK_KEYS or len(settings.SECRET_KEY) < 32:
+    _msg = (
+        "\n[FATAL] SECRET_KEY is too weak or still the default value!\n"
+        "Generate a strong key with: openssl rand -hex 32\n"
+        "Then set SECRET_KEY=<result> in backend/.env\n"
+    )
+    if settings.APP_ENV == "production":
+        print(_msg, file=sys.stderr)
+        sys.exit(1)
+    else:
+        # In dev/staging — warn loudly but don't exit so developers can still run locally
+        print(f"[WARNING]{_msg}", file=sys.stderr)

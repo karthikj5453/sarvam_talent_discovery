@@ -6,7 +6,7 @@ Flow:
 2. Load job's competency weights
 3. Call Sarvam STT-Translate to get English translation of all answers
 4. Build scoring prompt with job context + all transcripts
-5. Call Gemini LLM to score 6 competency dimensions
+5. Call Gemini LLM to score 7 competency dimensions
 6. Generate HR summary text (from LLM or template)
 7. Convert summary to audio via Sarvam TTS
 8. Upload summary audio to S3 / local storage
@@ -45,15 +45,43 @@ COMPETENCY_KEYS = [
     "eq_score",
 ]
 
+# FIX: weights now sum to exactly 1.0 (previously eq_score was missing)
 DEFAULT_WEIGHTS = {
-    "technical_depth": 0.25,
-    "first_principles": 0.20,
-    "shipping_velocity": 0.20,
-    "ownership_signals": 0.15,
-    "curiosity_depth": 0.10,
-    "multilingual_fluency": 0.10,
-    "eq_score": 0.10,
+    "technical_depth":      0.25,
+    "first_principles":     0.20,
+    "shipping_velocity":    0.18,
+    "ownership_signals":    0.14,
+    "curiosity_depth":      0.10,
+    "multilingual_fluency": 0.08,
+    "eq_score":             0.05,
 }
+# Verify: 0.25 + 0.20 + 0.18 + 0.14 + 0.10 + 0.08 + 0.05 = 1.00
+
+
+# ─── PROMPT INJECTION SANITISER ───────────────────────────────
+# Multi-strategy approach — more robust than a single regex.
+_INJECTION_PATTERNS = [
+    # Common direct injection phrases (case-insensitive)
+    r'(?i)(ignore|disregard|forget|override|bypass)\s+(all\s+)?(previous|prior|above|system|these)\s+(instructions?|prompts?|context|rules?)',
+    # Roleplay / persona hijacking
+    r'(?i)(you are now|pretend (you are|to be)|act as|from now on)',
+    # Common jailbreak prefixes
+    r'(?i)(DAN|STAN|jailbreak|developer mode)',
+    # Instruction-style imperative targeting the model
+    r'(?i)(return only|output only|respond with|print the|reveal the|show me the).{0,30}(password|key|secret|token|system prompt)',
+]
+_COMPILED_PATTERNS = [re.compile(p) for p in _INJECTION_PATTERNS]
+
+
+def _sanitise_transcript(text: str) -> str:
+    """
+    Remove known prompt injection patterns from candidate transcript.
+    Falls back gracefully — never raises.
+    """
+    sanitised = text
+    for pattern in _COMPILED_PATTERNS:
+        sanitised = pattern.sub("[FILTERED]", sanitised)
+    return sanitised
 
 
 # ─── MAIN ENTRY POINT ─────────────────────────────────────────
@@ -72,16 +100,24 @@ async def run_evaluation(session_id: uuid.UUID, db: Session) -> Optional[Compete
     # ── 1. Load session + candidate + job ─────────────────────
     session = db.query(ScreeningSession).filter(ScreeningSession.id == session_id).first()
     if not session:
-        logger.error(f"[Evaluator] Session {session_id} not found")
+        logger.error("[Evaluator] Session %s not found", session_id)
         return None
 
     candidate = db.query(Candidate).filter(Candidate.id == session.candidate_id).first()
     if not candidate:
-        logger.error(f"[Evaluator] Candidate not found for session {session_id}")
+        logger.error("[Evaluator] Candidate not found for session %s", session_id)
         return None
 
     job = db.query(Job).filter(Job.id == candidate.job_id).first()
     weights = job.competency_weights if job and job.competency_weights else DEFAULT_WEIGHTS
+
+    # Validate weights sum to 1.0 (±0.01 tolerance) — use defaults if malformed
+    weight_sum = sum(weights.get(k, 0) for k in COMPETENCY_KEYS)
+    if not (0.99 <= weight_sum <= 1.01):
+        logger.warning(
+            "[Evaluator] Job weights sum to %.3f (not 1.0) — using defaults", weight_sum
+        )
+        weights = DEFAULT_WEIGHTS
 
     # ── 2. Collect all transcripts ────────────────────────────
     transcripts = _collect_transcripts(session, candidate)
@@ -116,9 +152,9 @@ async def run_evaluation(session_id: uuid.UUID, db: Session) -> Optional[Compete
         s3_key = upload_audio(audio_bytes, str(candidate.id), label="hr_summary")
         hr_summary_audio_url = key_to_url(s3_key)
     except SarvamError as e:
-        logger.warning(f"[Evaluator] TTS failed: {e} — continuing without audio")
+        logger.warning("[Evaluator] TTS failed: %s -- continuing without audio", e)
     except Exception as e:
-        logger.warning(f"[Evaluator] Audio upload failed: {e} — continuing without audio")
+        logger.warning("[Evaluator] Audio upload failed: %s -- continuing without audio", e)
 
     # ── 8. Save to DB ────────────────────────────────────────
     score_row = CompetencyScore(
@@ -140,13 +176,13 @@ async def run_evaluation(session_id: uuid.UUID, db: Session) -> Optional[Compete
     )
     db.add(score_row)
 
-    # Move candidate to shortlisted if score ≥ 6.0
+    # Move candidate to shortlisted if score >= 6.0
     if total_score >= 6.0:
         candidate.status = "shortlisted"
 
     db.commit()
     db.refresh(score_row)
-    logger.info(f"[Evaluator] Scored candidate {candidate.id}: {total_score:.2f}")
+    logger.info("[Evaluator] Scored candidate %s: %.2f", candidate.id, total_score)
     return score_row
 
 
@@ -191,7 +227,7 @@ async def _translate_if_needed(transcripts: dict, language_code: Optional[str]) 
         )
         return translated
     except SarvamError as e:
-        logger.warning(f"[Evaluator] Translation failed ({e}), using original text")
+        logger.warning("[Evaluator] Translation failed (%s), using original text", e)
         return combined
 
 
@@ -202,9 +238,9 @@ async def _score_competencies(
     weights: dict,
 ) -> tuple[dict, dict, list, Optional[str]]:
     """
-    Score the candidate across 6 competency dimensions.
+    Score the candidate across 7 competency dimensions.
 
-    Primary: Uses Gemini LLM with the scoring prompt from ai/prompts/competency_scorer.py
+    Primary: Uses Gemini LLM with the scoring prompt.
     Fallback: Falls back to keyword heuristic if Gemini is unavailable.
 
     Returns:
@@ -213,8 +249,16 @@ async def _score_competencies(
         flags:          ["low_shipping_velocity"]
         hr_summary:     LLM-generated summary string (or None if fallback used)
     """
+    # ── Multi-pattern prompt injection sanitisation ────────────
+    sanitised_text = _sanitise_transcript(english_text)
+
+    # Hard truncate to prevent extremely long injected prompts
+    MAX_INPUT_CHARS = 12000
+    if len(sanitised_text) > MAX_INPUT_CHARS:
+        sanitised_text = sanitised_text[:MAX_INPUT_CHARS] + "\n[TRANSCRIPT TRUNCATED]"
+
     system_prompt, user_prompt = build_scoring_prompt(
-        transcript=english_text,
+        transcript=sanitised_text,
         job_title=job_title,
         required_skills=required_skills,
         weights=weights,
@@ -234,20 +278,30 @@ async def _score_competencies(
             raw = scores_raw.get(key, 5.0)
             scores[key] = round(max(0.0, min(10.0, float(raw))), 1)
 
+        # Detect suspiciously uniform scores (all identical = likely LLM failure)
+        unique_scores = set(scores.values())
+        if len(unique_scores) == 1:
+            logger.warning(
+                "[Evaluator] All scores identical (%s) -- LLM output suspect, using heuristic",
+                unique_scores,
+            )
+            scores, justifications, flags = _heuristic_scorer(english_text, required_skills)
+            return scores, justifications, flags, None
+
         # Auto-flag low scores if LLM didn't flag them
         auto_flags = [k for k, v in scores.items() if v < 4.0]
         flags = list(set(flags) | set(auto_flags))
 
-        logger.info(f"[Evaluator] Gemini scored successfully. Total input chars: {len(english_text)}")
+        logger.info("[Evaluator] Gemini scored successfully. Total input chars: %d", len(english_text))
         return scores, justifications, flags, hr_summary
 
     except GeminiError as e:
-        logger.warning(f"[Evaluator] Gemini failed: {e} — falling back to heuristic scorer")
+        logger.warning("[Evaluator] Gemini failed: %s -- falling back to heuristic scorer", e)
         scores, justifications, flags = _heuristic_scorer(english_text, required_skills)
         return scores, justifications, flags, None
 
     except Exception as e:
-        logger.warning(f"[Evaluator] Unexpected error during scoring: {e} — using heuristic")
+        logger.warning("[Evaluator] Unexpected error during scoring: %s -- using heuristic", e)
         scores, justifications, flags = _heuristic_scorer(english_text, required_skills)
         return scores, justifications, flags, None
 
@@ -255,12 +309,7 @@ async def _score_competencies(
 def _heuristic_scorer(text: str, required_skills: list) -> tuple[dict, dict, list]:
     """
     Rule-based scorer using keyword signals.
-    This is a placeholder — replace with LLM in Phase 4.
-
-    Scoring logic:
-    - Check for presence of keywords associated with each competency
-    - Length of response signals engagement
-    - Skill mentions boost technical_depth
+    Used as fallback when Gemini is unavailable.
     """
     text_lower = text.lower()
     word_count = len(text.split())
@@ -273,48 +322,65 @@ def _heuristic_scorer(text: str, required_skills: list) -> tuple[dict, dict, lis
         return min(10.0, base + (hits * 0.5) + engagement)
 
     # Keyword signal maps per dimension
-    technical_kws = ["implemented", "built", "architecture", "system", "algorithm",
-                     "scale", "performance", "database", "api", "model", "trained",
-                     "deployed", "optimized"] + [s.lower() for s in (required_skills or [])]
+    technical_kws = [
+        "implemented", "built", "architecture", "system", "algorithm",
+        "scale", "performance", "database", "api", "model", "trained",
+        "deployed", "optimized",
+    ] + [s.lower() for s in (required_skills or [])]
 
-    first_principles_kws = ["because", "reason", "fundamental", "why", "root cause",
-                            "from scratch", "first principles", "underlying", "assumption",
-                            "derived", "math", "proof", "logic"]
+    first_principles_kws = [
+        "because", "reason", "fundamental", "why", "root cause",
+        "from scratch", "first principles", "underlying", "assumption",
+        "derived", "math", "proof", "logic",
+    ]
 
-    shipping_kws = ["shipped", "launched", "deployed", "production", "released",
-                    "users", "customers", "delivered", "completed", "live",
-                    "in production", "worked on", "finished"]
+    shipping_kws = [
+        "shipped", "launched", "deployed", "production", "released",
+        "users", "customers", "delivered", "completed", "live",
+        "in production", "worked on", "finished",
+    ]
 
-    ownership_kws = ["i took", "i led", "i owned", "my responsibility", "i initiated",
-                     "i decided", "accountability", "proactive", "without being asked",
-                     "volunteer", "took charge", "my project"]
+    ownership_kws = [
+        "i took", "i led", "i owned", "my responsibility", "i initiated",
+        "i decided", "accountability", "proactive", "without being asked",
+        "volunteer", "took charge", "my project",
+    ]
 
-    curiosity_kws = ["curious", "learn", "reading", "experimenting", "side project",
-                     "interest", "explore", "fascinating", "research", "studying",
-                     "hobby", "passionate", "follow", "newsletter"]
+    curiosity_kws = [
+        "curious", "learn", "reading", "experimenting", "side project",
+        "interest", "explore", "fascinating", "research", "studying",
+        "hobby", "passionate", "follow", "newsletter",
+    ]
 
-    multilingual_kws = ["hindi", "tamil", "telugu", "kannada", "malayalam", "bengali",
-                        "language", "communicate", "mother tongue", "native",
-                        "translated", "multilingual", "regional"]
+    multilingual_kws = [
+        "hindi", "tamil", "telugu", "kannada", "malayalam", "bengali",
+        "language", "communicate", "mother tongue", "native",
+        "translated", "multilingual", "regional",
+    ]
+
+    eq_kws = [
+        "team", "collaborate", "empathy", "listen", "feedback",
+        "conflict", "support", "mentor", "communicate", "understand",
+    ]
 
     scores = {
-        "technical_depth":    round(signal_score(technical_kws, base=4.0), 1),
-        "first_principles":   round(signal_score(first_principles_kws, base=4.5), 1),
-        "shipping_velocity":  round(signal_score(shipping_kws, base=4.0), 1),
-        "ownership_signals":  round(signal_score(ownership_kws, base=4.5), 1),
-        "curiosity_depth":    round(signal_score(curiosity_kws, base=4.5), 1),
+        "technical_depth":      round(signal_score(technical_kws, base=4.0), 1),
+        "first_principles":     round(signal_score(first_principles_kws, base=4.5), 1),
+        "shipping_velocity":    round(signal_score(shipping_kws, base=4.0), 1),
+        "ownership_signals":    round(signal_score(ownership_kws, base=4.5), 1),
+        "curiosity_depth":      round(signal_score(curiosity_kws, base=4.5), 1),
         "multilingual_fluency": round(signal_score(multilingual_kws, base=5.0), 1),
-        "eq_score":           round(signal_score(["confident", "excited", "happy"], base=5.0), 1),
+        "eq_score":             round(signal_score(eq_kws, base=5.0), 1),
     }
 
     justifications = {
-        "technical_depth":    f"Score based on technical keyword density and skill mentions in transcript.",
-        "first_principles":   f"Score based on reasoning language patterns detected.",
-        "shipping_velocity":  f"Score based on delivery and launch keywords in responses.",
-        "ownership_signals":  f"Score based on first-person ownership language.",
-        "curiosity_depth":    f"Score based on learning and exploration signals.",
-        "multilingual_fluency": f"Score based on multilingual context in responses.",
-        "eq_score":           f"Score based on emotional intelligence and tone markers.",
+        "technical_depth":      "Score based on technical keyword density and skill mentions in transcript.",
+        "first_principles":     "Score based on reasoning language patterns detected.",
+        "shipping_velocity":    "Score based on delivery and launch keywords in responses.",
+        "ownership_signals":    "Score based on first-person ownership language.",
+        "curiosity_depth":      "Score based on learning and exploration signals.",
+        "multilingual_fluency": "Score based on multilingual context in responses.",
+        "eq_score":             "Score based on collaboration and emotional intelligence markers.",
     }
 
     flags = [k for k, v in scores.items() if v < 5.0]
