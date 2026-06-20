@@ -79,6 +79,7 @@ def create_candidate(
         github_url=getattr(payload, "github_url", None),
         job_id=payload.job_id,
         status="applied",
+        consent_given=payload.consent_given,
     )
     db.add(candidate)
     try:
@@ -188,6 +189,7 @@ def public_apply(request: Request, payload: CandidateCreate, db: Session = Depen
         github_url=getattr(payload, "github_url", None),
         job_id=payload.job_id,
         status="applied",
+        consent_given=payload.consent_given,
     )
     db.add(candidate)
     try:

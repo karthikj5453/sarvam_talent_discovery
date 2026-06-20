@@ -82,3 +82,52 @@ def test_screening_api_flow(client, db_session):
     # Check candidate status update
     db_session.refresh(candidate)
     assert candidate.status == "screened"
+
+
+def test_candidate_apply_consent_flow(client, db_session):
+    # Create a job
+    job = Job(
+        title="Software Engineer",
+        required_skills=["Python"],
+        competency_weights={"technical_depth": 0.5}
+    )
+    db_session.add(job)
+    db_session.commit()
+    db_session.refresh(job)
+
+    # 1. Apply without consent (consent_given=False)
+    apply_resp_no_consent = client.post(
+        "/candidates/public/apply",
+        json={
+            "name": "No Consent Cand",
+            "email": "noconsent@example.com",
+            "phone": "1234567890",
+            "job_id": str(job.id),
+            "consent_given": False
+        }
+    )
+    assert apply_resp_no_consent.status_code == 201
+    cand_no_consent = apply_resp_no_consent.json()
+
+    # Verify that starting screening fails
+    start_no_consent = client.post("/screening/start", json={"candidate_id": cand_no_consent["id"]})
+    assert start_no_consent.status_code == 403
+    assert "Consent must be recorded" in start_no_consent.json()["detail"]
+
+    # 2. Apply with consent (consent_given=True)
+    apply_resp_with_consent = client.post(
+        "/candidates/public/apply",
+        json={
+            "name": "Consent Cand",
+            "email": "consent@example.com",
+            "phone": "9876543210",
+            "job_id": str(job.id),
+            "consent_given": True
+        }
+    )
+    assert apply_resp_with_consent.status_code == 201
+    cand_with_consent = apply_resp_with_consent.json()
+
+    # Verify that starting screening succeeds
+    start_with_consent = client.post("/screening/start", json={"candidate_id": cand_with_consent["id"]})
+    assert start_with_consent.status_code == 201

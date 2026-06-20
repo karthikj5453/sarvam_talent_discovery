@@ -24,13 +24,13 @@ export const api = {
   },
 
   // Candidate application
-  async applyJob({ name, email, phone, github_url, jobId }) {
+  async applyJob({ name, email, phone, github_url, jobId, consent_given }) {
     return request('/candidates/public/apply', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ name, email, phone, github_url, job_id: jobId }),
+      body: JSON.stringify({ name, email, phone, github_url, job_id: jobId, consent_given }),
     });
   },
 

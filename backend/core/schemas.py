@@ -50,6 +50,7 @@ class CandidateBase(BaseModel):
     phone: Optional[str] = None
     github_url: Optional[str] = None
     job_id: UUID
+    consent_given: bool = False
 
 class CandidateCreate(CandidateBase):
     pass

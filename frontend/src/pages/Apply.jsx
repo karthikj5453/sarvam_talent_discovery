@@ -7,7 +7,7 @@ const STEPS = ['Apply', 'Intro', 'Interview', 'Done'];
 
 export default function Apply() {
   const [jobs, setJobs] = useState([]);
-  const [formData, setFormData] = useState({ name: '', email: '', phone: '', github_url: '', jobId: '' });
+  const [formData, setFormData] = useState({ name: '', email: '', phone: '', github_url: '', jobId: '', consent_given: false });
   const [resumeFile, setResumeFile] = useState(null);
   const [loading, setLoading] = useState(false);
   const [jobsLoading, setJobsLoading] = useState(true);
@@ -32,13 +32,17 @@ export default function Apply() {
   }, []);
 
   const handleChange = e => {
-    const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
+    const { name, value, type, checked } = e.target;
+    setFormData(prev => ({ ...prev, [name]: type === 'checkbox' ? checked : value }));
   };
 
   const handleSubmit = async e => {
     e.preventDefault();
     if (!formData.jobId) { setError('Please select a position.'); return; }
+    if (!formData.consent_given) {
+      setError('Consent for data processing is required to start screening.');
+      return;
+    }
     setLoading(true);
     setError(null);
 
@@ -194,7 +198,28 @@ export default function Apply() {
             </div>
           </div>
 
-          <button type="submit" className="btn btn-primary" disabled={loading} style={{ marginTop: '0.75rem' }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem', marginTop: '1.25rem', marginBottom: '1.25rem' }}>
+            <input
+              id="consent_given"
+              type="checkbox"
+              name="consent_given"
+              checked={formData.consent_given}
+              onChange={handleChange}
+              required
+              style={{
+                width: '18px',
+                height: '18px',
+                accentColor: 'var(--primary)',
+                cursor: 'pointer',
+                marginTop: '2px'
+              }}
+            />
+            <label htmlFor="consent_given" style={{ fontSize: '0.825rem', color: 'var(--text-light)', lineHeight: 1.4, cursor: 'pointer', userSelect: 'none' }}>
+              I consent to the recording, processing, and translation of my voice and resume data for evaluation purposes (DPDP Act 2023 / GDPR compliance).
+            </label>
+          </div>
+
+          <button type="submit" className="btn btn-primary" disabled={loading}>
             {loading ? <><span className="spinner" /> Submitting...</> : <>Apply & Start Screening <ChevronRight size={16} /></>}
           </button>
         </form>
