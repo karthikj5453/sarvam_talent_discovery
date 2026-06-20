@@ -2,7 +2,8 @@ import pytest
 from fastapi.testclient import TestClient
 from main import app
 from core.database import get_db
-from core.models import Job, Candidate, ScreeningSession
+from core.models import Job, Candidate, ScreeningSession, User
+from core.security import create_access_token
 
 # We will override get_db to return our session-managed db_session fixture.
 # Since db_session is function-scoped, the override will be clean for each test.
@@ -131,3 +132,58 @@ def test_candidate_apply_consent_flow(client, db_session):
     # Verify that starting screening succeeds
     start_with_consent = client.post("/screening/start", json={"candidate_id": cand_with_consent["id"]})
     assert start_with_consent.status_code == 201
+
+
+def test_delete_candidate(client, db_session):
+    # 1. Create a user for authentication
+    user = User(
+        email="hr_test@company.com",
+        hashed_password="hashed_placeholder",
+        full_name="HR Test User",
+        role="hr"
+    )
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+
+    token = create_access_token(data={"sub": user.email})
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # 2. Create Job and Candidate to delete
+    job = Job(
+        title="Python Developer",
+        required_skills=["Python"],
+        competency_weights={"technical_depth": 0.5}
+    )
+    db_session.add(job)
+    db_session.commit()
+    db_session.refresh(job)
+
+    candidate = Candidate(
+        name="Candidate to Delete",
+        email="delete_me@example.com",
+        phone="9876543210",
+        job_id=job.id,
+        status="applied",
+        consent_given=True
+    )
+    db_session.add(candidate)
+    db_session.commit()
+    db_session.refresh(candidate)
+
+    # Add a screening session for candidate
+    session = ScreeningSession(candidate_id=candidate.id)
+    db_session.add(session)
+    db_session.commit()
+    db_session.refresh(session)
+
+    # 3. Call DELETE candidate endpoint
+    delete_resp = client.delete(f"/candidates/{candidate.id}", headers=headers)
+    assert delete_resp.status_code == 200
+    assert delete_resp.json()["status"] == "deleted"
+
+    # 4. Verify candidate and session are deleted from DB
+    deleted_cand = db_session.query(Candidate).filter(Candidate.id == candidate.id).first()
+    assert deleted_cand is None
+    deleted_sess = db_session.query(ScreeningSession).filter(ScreeningSession.candidate_id == candidate.id).first()
+    assert deleted_sess is None

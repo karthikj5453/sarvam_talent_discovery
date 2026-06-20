@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../services/api';
-import { Search, Filter, User, Calendar, Award, Globe, ArrowRight, ChevronLeft, ChevronRight, Clock, CheckCircle2 } from 'lucide-react';
+import { Search, Filter, User, Calendar, Award, Globe, ArrowRight, ChevronLeft, ChevronRight, Clock, CheckCircle2, Trash2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 const PAGE_SIZE = 15;
@@ -25,6 +25,16 @@ export default function Candidates() {
       console.error('Failed to load candidate metrics:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleDeleteCandidate = async (candId) => {
+    if (!window.confirm("Are you sure you want to permanently delete this candidate and all their data? This cannot be undone.")) return;
+    try {
+      await api.deleteCandidate(candId);
+      loadData();
+    } catch (err) {
+      alert(err.message || 'Failed to delete candidate.');
     }
   };
 
@@ -191,10 +201,18 @@ export default function Candidates() {
                       {cand.status}
                     </span>
                   </td>
-                  <td>
-                    <Link to={`/candidates/${cand.id}`} className="btn btn-secondary" style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }}>
+                  <td style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                    <Link to={`/candidates/${cand.id}`} className="btn btn-secondary" style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem', width: 'auto' }}>
                       Details <ArrowRight size={12} />
                     </Link>
+                    <button
+                      className="btn btn-secondary"
+                      style={{ padding: '0.4rem', color: 'var(--error)', borderColor: 'rgba(239, 71, 111, 0.2)', width: 'auto', display: 'inline-flex' }}
+                      onClick={() => handleDeleteCandidate(cand.id)}
+                      title="Delete Candidate Profile"
+                    >
+                      <Trash2 size={14} />
+                    </button>
                   </td>
                 </tr>
               );

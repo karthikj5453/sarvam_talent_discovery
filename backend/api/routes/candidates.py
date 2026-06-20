@@ -8,7 +8,7 @@ from uuid import UUID
 import logging
 
 from core.database import get_db
-from core.models import Candidate, Job, CompetencyScore, ScreeningSession
+from core.models import Candidate, Job, CompetencyScore, ScreeningSession, AnalyticsEvent
 from core.schemas import (
     CandidateCreate, CandidateResponse, CandidateStatusUpdate,
     CompetencyScoreResponse, CandidateWithScore,
@@ -276,3 +276,70 @@ def gdpr_erase_candidate(
     db.commit()
     logger.info("[GDPR] Candidate %s erased by admin %s", candidate_id, current_user.email)
     return {"status": "erased", "candidate_id": str(candidate_id)}
+
+
+# ─── HARD DELETE CANDIDATE ────────────────────────────────────
+@router.delete("/{candidate_id}", status_code=status.HTTP_200_OK)
+def delete_candidate(
+    candidate_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Hard delete a candidate and all associated records (scores, sessions, events, files).
+    """
+    candidate = db.query(Candidate).filter(Candidate.id == candidate_id).first()
+    if not candidate:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+
+    # 1. Delete actual files from S3/disk
+    if candidate.resume_url:
+        try:
+            key = url_to_key(candidate.resume_url)
+            if key:
+                delete_file(key)
+        except Exception as e:
+            logger.warning("[Delete] Failed to delete resume file: %s", e)
+
+    sessions = db.query(ScreeningSession).filter(
+        ScreeningSession.candidate_id == candidate_id
+    ).all()
+    for sess in sessions:
+        # Delete audio files
+        for url in [sess.intro_audio_url]:
+            if url:
+                try:
+                    key = url_to_key(url)
+                    if key:
+                        delete_file(key)
+                except Exception as e:
+                    logger.warning("[Delete] Failed to delete intro audio file: %s", e)
+
+        for ans in (sess.followup_answers or []):
+            if isinstance(ans, dict) and ans.get("answer_audio_url"):
+                try:
+                    key = url_to_key(ans["answer_audio_url"])
+                    if key:
+                        delete_file(key)
+                except Exception as e:
+                    logger.warning("[Delete] Failed to delete answer audio: %s", e)
+
+    # 2. Delete database records in dependency order
+    try:
+        # Delete competency scores
+        db.query(CompetencyScore).filter(CompetencyScore.candidate_id == candidate_id).delete()
+        # Delete screening sessions
+        db.query(ScreeningSession).filter(ScreeningSession.candidate_id == candidate_id).delete()
+        # Delete analytics events
+        db.query(AnalyticsEvent).filter(AnalyticsEvent.candidate_id == candidate_id).delete()
+        # Delete candidate
+        db.query(Candidate).filter(Candidate.id == candidate_id).delete()
+        
+        db.commit()
+        logger.info("[Delete] Candidate %s and all associated data deleted by user %s", candidate_id, current_user.email)
+    except Exception as e:
+        db.rollback()
+        logger.error("[Delete] Failed to delete candidate %s from DB: %s", candidate_id, e)
+        raise HTTPException(status_code=500, detail="Failed to delete candidate from database")
+
+    return {"status": "deleted", "candidate_id": str(candidate_id)}

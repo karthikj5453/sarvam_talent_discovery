@@ -123,6 +123,10 @@ export const api = {
     });
   },
 
+  async deleteCandidate(candidateId) {
+    return request(`/candidates/${candidateId}`, { method: 'DELETE' });
+  },
+
   // ─── Evaluations ───────────────────────────────────────────
   async getEvaluations(jobId = null, minScore = null) {
     const params = new URLSearchParams();

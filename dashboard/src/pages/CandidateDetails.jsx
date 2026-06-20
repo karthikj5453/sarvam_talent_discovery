@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { api } from '../services/api';
-import { ArrowLeft, User, Mail, Phone, Calendar, Globe, FileText, CheckCircle, XCircle, Play, AlertTriangle, Download } from 'lucide-react';
+import { ArrowLeft, User, Mail, Phone, Calendar, Globe, FileText, CheckCircle, XCircle, Play, AlertTriangle, Download, Trash2 } from 'lucide-react';
 import { Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer } from 'recharts';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
@@ -51,6 +51,16 @@ export default function CandidateDetails() {
       console.error(err);
     } finally {
       setStatusLoading(false);
+    }
+  };
+
+  const handleDeleteCandidate = async () => {
+    if (!window.confirm("Are you sure you want to permanently delete this candidate and all their associated data (audio files, resume, scores)? This cannot be undone.")) return;
+    try {
+      await api.deleteCandidate(candidateId);
+      navigate('/candidates');
+    } catch (err) {
+      alert(err.message || 'Failed to delete candidate.');
     }
   };
 
@@ -128,6 +138,14 @@ export default function CandidateDetails() {
                 <Download size={16} /> {pdfGenerating ? 'Generating...' : 'Export Dossier'}
               </button>
              )}
+            <button 
+              className="btn btn-secondary" 
+              style={{ color: 'var(--error)', borderColor: 'rgba(239, 71, 111, 0.2)' }}
+              onClick={handleDeleteCandidate}
+              title="Permanently Delete Candidate"
+            >
+              <Trash2 size={16} /> Delete
+            </button>
             <button 
               className="btn btn-secondary" 
               style={{ color: 'var(--error)', borderColor: 'rgba(239, 71, 111, 0.2)' }}
