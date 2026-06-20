@@ -166,7 +166,7 @@ export default function CandidateDetails() {
         
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem' }}>
           <div>
-            <h1 style={{ fontSize: '2rem', fontWeight: 800, color: '#fff', marginBottom: '0.25rem' }}>{candidate.name}</h1>
+            <h1 style={{ fontSize: '2rem', fontWeight: 800, color: 'var(--text-primary)', marginBottom: '0.25rem' }}>{candidate.name}</h1>
             <p style={{ color: 'var(--text-muted)' }}>Applicant Profile Review</p>
           </div>
 
@@ -240,7 +240,7 @@ export default function CandidateDetails() {
           
           {evaluation ? (
             <div className="dashboard-card">
-              <h2 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#fff', marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <h2 style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                 AI Recruiter Assessment Report
               </h2>
 
@@ -254,7 +254,7 @@ export default function CandidateDetails() {
                 </div>
 
                 <div>
-                  <h4 style={{ fontSize: '0.9rem', fontWeight: 700, color: '#fff', marginBottom: '0.5rem' }}>Executive HR Summary</h4>
+                  <h4 style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.5rem' }}>Executive HR Summary</h4>
                   <p style={{ fontSize: '0.9rem', color: 'var(--text-body)', lineHeight: 1.5 }}>
                     {evaluation.hr_summary}
                   </p>
@@ -276,7 +276,7 @@ export default function CandidateDetails() {
                 <div style={{ display: 'flex', gap: '0.75rem', background: 'rgba(252, 163, 17, 0.1)', border: '1px solid rgba(252, 163, 17, 0.2)', padding: '1rem', borderRadius: '0.75rem', marginBottom: '2rem' }}>
                   <AlertTriangle size={20} style={{ color: 'var(--warning)', flexShrink: 0 }} />
                   <div>
-                    <h5 style={{ fontSize: '0.85rem', fontWeight: 700, color: '#fff', marginBottom: '0.1rem' }}>Recruiter Attention Flags</h5>
+                    <h5 style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.1rem' }}>Recruiter Attention Flags</h5>
                     <p style={{ fontSize: '0.8rem', color: 'var(--text-body)' }}>
                       Heuristic signals detected concerns: {evaluation.flags.map(f => f.replace('_', ' ')).join(', ')}.
                     </p>
@@ -289,7 +289,7 @@ export default function CandidateDetails() {
                 <div style={{ display: 'flex', gap: '0.75rem', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.2)', padding: '1rem', borderRadius: '0.75rem', marginBottom: '2rem' }}>
                   <AlertTriangle size={20} style={{ color: 'var(--error)', flexShrink: 0 }} />
                   <div>
-                    <h5 style={{ fontSize: '0.85rem', fontWeight: 700, color: '#fff', marginBottom: '0.1rem' }}>Proctoring Alerts Detected</h5>
+                    <h5 style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.1rem' }}>Proctoring Alerts Detected</h5>
                     <p style={{ fontSize: '0.8rem', color: 'var(--text-body)' }}>
                       Candidate left the interview tab {session.proctoring_flags.tab_switches} times and triggered {session.proctoring_flags.paste_events} paste warnings.
                     </p>
@@ -299,7 +299,7 @@ export default function CandidateDetails() {
 
               {/* Radar Chart */}
               <div style={{ borderTop: '1px solid var(--border-card)', paddingTop: '1.5rem', marginBottom: '1.5rem' }}>
-                <h4 style={{ fontSize: '0.9rem', fontWeight: 700, color: '#fff', marginBottom: '1.25rem' }}>Competency Dimension Radar</h4>
+                <h4 style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '1.25rem' }}>Competency Dimension Radar</h4>
                 <div style={{ width: '100%', height: 300 }}>
                   <ResponsiveContainer>
                     <RadarChart cx="50%" cy="50%" outerRadius="80%" data={scoresList}>
@@ -321,7 +321,7 @@ export default function CandidateDetails() {
           {/* Transcripts review */}
           {session && (
             <div className="dashboard-card">
-              <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#fff', marginBottom: '1.5rem' }}>Interview Transcripts Review</h3>
+              <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '1.5rem' }}>Interview Transcripts Review</h3>
               
               <div style={{ marginBottom: '2rem' }}>
                 <h4 style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--primary-light)', marginBottom: '0.5rem' }}>Voice Introduction</h4>
@@ -362,7 +362,7 @@ export default function CandidateDetails() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
           
           <div className="dashboard-card">
-            <h3 style={{ fontSize: '0.95rem', fontWeight: 700, color: '#fff', marginBottom: '1.25rem', borderBottom: '1px solid var(--border-card)', paddingBottom: '0.5rem' }}>
+            <h3 style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '1.25rem', borderBottom: '1px solid var(--border-card)', paddingBottom: '0.5rem' }}>
               Candidate Metadata
             </h3>
             
@@ -371,7 +371,7 @@ export default function CandidateDetails() {
                 <User size={16} style={{ color: 'var(--text-muted)' }} />
                 <div>
                   <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>FULL NAME</p>
-                  <p style={{ fontSize: '0.9rem', fontWeight: 600, color: '#fff' }}>{candidate.name}</p>
+                  <p style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--text-primary)' }}>{candidate.name}</p>
                 </div>
               </div>
 
@@ -379,7 +379,7 @@ export default function CandidateDetails() {
                 <Mail size={16} style={{ color: 'var(--text-muted)' }} />
                 <div>
                   <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>EMAIL ADDRESS</p>
-                  <p style={{ fontSize: '0.9rem', color: '#fff' }}>{candidate.email}</p>
+                  <p style={{ fontSize: '0.9rem', color: 'var(--text-primary)' }}>{candidate.email}</p>
                 </div>
               </div>
 
@@ -387,7 +387,7 @@ export default function CandidateDetails() {
                 <Phone size={16} style={{ color: 'var(--text-muted)' }} />
                 <div>
                   <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>PHONE NUMBER</p>
-                  <p style={{ fontSize: '0.9rem', color: '#fff' }}>{candidate.phone || 'N/A'}</p>
+                  <p style={{ fontSize: '0.9rem', color: 'var(--text-primary)' }}>{candidate.phone || 'N/A'}</p>
                 </div>
               </div>
 
@@ -395,7 +395,7 @@ export default function CandidateDetails() {
                 <Globe size={16} style={{ color: 'var(--text-muted)' }} />
                 <div>
                   <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>DETECTED LANGUAGE</p>
-                  <p style={{ fontSize: '0.9rem', color: '#fff', textTransform: 'uppercase' }}>{candidate.detected_language || 'N/A'}</p>
+                  <p style={{ fontSize: '0.9rem', color: 'var(--text-primary)', textTransform: 'uppercase' }}>{candidate.detected_language || 'N/A'}</p>
                 </div>
               </div>
 
@@ -415,7 +415,7 @@ export default function CandidateDetails() {
                 <CheckCircle size={16} style={{ color: candidate.consent_given ? 'var(--success)' : 'var(--text-muted)' }} />
                 <div>
                   <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>DATA CONSENT</p>
-                  <p style={{ fontSize: '0.9rem', color: '#fff' }}>{candidate.consent_given ? 'Given' : 'Not recorded'}</p>
+                  <p style={{ fontSize: '0.9rem', color: 'var(--text-primary)' }}>{candidate.consent_given ? 'Given' : 'Not recorded'}</p>
                 </div>
               </div>
             </div>
@@ -423,7 +423,7 @@ export default function CandidateDetails() {
 
           {/* Recruiter Notes */}
           <div className="dashboard-card">
-            <h3 style={{ fontSize: '0.95rem', fontWeight: 700, color: '#fff', marginBottom: '1rem' }}>Recruiter Notes</h3>
+            <h3 style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '1rem' }}>Recruiter Notes</h3>
             <form onSubmit={handleAddNote} style={{ marginBottom: '1rem' }}>
               <textarea
                 className="form-input"
@@ -454,7 +454,7 @@ export default function CandidateDetails() {
           {/* Activity Timeline */}
           {timeline.length > 0 && (
             <div className="dashboard-card">
-              <h3 style={{ fontSize: '0.95rem', fontWeight: 700, color: '#fff', marginBottom: '1rem' }}>Activity Timeline</h3>
+              <h3 style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '1rem' }}>Activity Timeline</h3>
               {timeline.slice(0, 8).map(item => (
                 <div key={item.id} style={{ paddingLeft: '1rem', borderLeft: '2px solid var(--border-card)', marginBottom: '0.75rem' }}>
                   <p style={{ fontSize: '0.85rem', color: 'var(--text-light)' }}>
@@ -469,7 +469,7 @@ export default function CandidateDetails() {
           )}
 
           <div className="dashboard-card">
-            <h3 style={{ fontSize: '0.95rem', fontWeight: 700, color: '#fff', marginBottom: '1rem', borderBottom: '1px solid var(--border-card)', paddingBottom: '0.5rem' }}>
+            <h3 style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '1rem', borderBottom: '1px solid var(--border-card)', paddingBottom: '0.5rem' }}>
               Resume Attachment
             </h3>
             {candidate.resume_url ? (
@@ -489,7 +489,7 @@ export default function CandidateDetails() {
 
           {candidate.resume_parsed_data && (
             <div className="dashboard-card">
-              <h3 style={{ fontSize: '0.95rem', fontWeight: 700, color: '#fff', marginBottom: '1rem', borderBottom: '1px solid var(--border-card)', paddingBottom: '0.5rem' }}>
+              <h3 style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '1rem', borderBottom: '1px solid var(--border-card)', paddingBottom: '0.5rem' }}>
                 AI Extracted Resume Data
               </h3>
               
@@ -514,7 +514,7 @@ export default function CandidateDetails() {
                 <h4 style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.25rem', textTransform: 'uppercase' }}>Experience</h4>
                 {(candidate.resume_parsed_data.experience || []).map((exp, idx) => (
                   <div key={idx} style={{ marginBottom: '0.75rem' }}>
-                    <p style={{ fontSize: '0.85rem', fontWeight: 600, color: '#fff' }}>{exp.title} <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>at {exp.company}</span></p>
+                    <p style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)' }}>{exp.title} <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>at {exp.company}</span></p>
                     <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{exp.duration}</p>
                   </div>
                 ))}
@@ -527,7 +527,7 @@ export default function CandidateDetails() {
                 <h4 style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.25rem', textTransform: 'uppercase' }}>Education</h4>
                 {(candidate.resume_parsed_data.education || []).map((edu, idx) => (
                   <div key={idx} style={{ marginBottom: '0.5rem' }}>
-                    <p style={{ fontSize: '0.85rem', fontWeight: 600, color: '#fff' }}>{edu.degree}</p>
+                    <p style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)' }}>{edu.degree}</p>
                     <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{edu.institution} ({edu.year})</p>
                   </div>
                 ))}

@@ -208,7 +208,7 @@ export default function Candidates() {
               const ev = evalStatus(cand, score);
               return (
                 <tr key={cand.id}>
-                  <td style={{ fontWeight: 600, color: '#fff' }}>
+                  <td style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
                     <div style={{ display: 'flex', flexDirection: 'column' }}>
                       <span>{cand.name}</span>
                       <span style={{ fontSize: '0.75rem', fontWeight: 400, color: 'var(--text-secondary)' }}>{cand.email}</span>
@@ -299,7 +299,7 @@ export default function Candidates() {
           return (
             <div key={cand.id} className="candidate-card-mobile dashboard-card">
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                <strong style={{ color: '#fff' }}>{cand.name}</strong>
+                <strong style={{ color: 'var(--text-primary)' }}>{cand.name}</strong>
                 <span className={`badge badge-${cand.status === 'shortlisted' ? 'success' : 'primary'}`}>{cand.status}</span>
               </div>
               <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>{cand.email}</p>

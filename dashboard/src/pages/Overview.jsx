@@ -126,7 +126,7 @@ export default function Overview() {
         {/* Pipeline Chart */}
         <div className="dashboard-card" style={{ animationDelay: '0.2s', display: 'flex', flexDirection: 'column' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-            <h3 style={{ fontSize: '0.95rem', fontWeight: 700, color: '#fff' }}>Recruitment Pipeline Volume</h3>
+            <h3 style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-primary)' }}>Recruitment Pipeline Volume</h3>
             <Link to="/candidates" style={{ fontSize: '0.78rem', color: 'var(--primary-light)', textDecoration: 'none', fontWeight: 600 }}>
               Candidates Directory →
             </Link>
@@ -140,7 +140,7 @@ export default function Overview() {
                   <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 11 }} allowDecimals={false} />
                   <Tooltip 
                     contentStyle={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-card)', borderRadius: '8px' }}
-                    labelStyle={{ color: '#fff', fontWeight: 600 }}
+                    labelStyle={{ color: 'var(--text-primary)', fontWeight: 600 }}
                   />
                   <Bar dataKey="count" radius={[4, 4, 0, 0]}>
                     {pipelineChartData.map((entry, index) => (
@@ -159,7 +159,7 @@ export default function Overview() {
 
         {/* Job Distribution Donut Chart */}
         <div className="dashboard-card" style={{ animationDelay: '0.25s', display: 'flex', flexDirection: 'column' }}>
-          <h3 style={{ fontSize: '0.95rem', fontWeight: 700, color: '#fff', marginBottom: '1.5rem' }}>Candidate Volume by Role</h3>
+          <h3 style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '1.5rem' }}>Candidate Volume by Role</h3>
           <div style={{ flexGrow: 1, minHeight: '260px' }}>
             {jobDistributionData.length > 0 ? (
               <ResponsiveContainer width="100%" height={260}>
@@ -202,7 +202,7 @@ export default function Overview() {
 
         {/* Screening Activity Table */}
         <div className="dashboard-card" style={{ animationDelay: '0.3s' }}>
-          <h3 style={{ fontSize: '0.95rem', fontWeight: 700, color: '#fff', marginBottom: '1.25rem' }}>Screening Activity & Status</h3>
+          <h3 style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '1.25rem' }}>Screening Activity & Status</h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             {[
               { label: 'Completed AI Evaluations', value: scoredEvals.length, desc: 'Candidate interviews scored and ranked' },
@@ -211,7 +211,7 @@ export default function Overview() {
             ].map(({ label, value, desc }) => (
               <div key={label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-glass)', border: '1px solid var(--border-card)', padding: '1rem', borderRadius: '0.75rem' }}>
                 <div>
-                  <p style={{ fontSize: '0.85rem', fontWeight: 600, color: '#fff' }}>{label}</p>
+                  <p style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)' }}>{label}</p>
                   <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{desc}</p>
                 </div>
                 <span style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--primary-light)' }}>{value}</span>
@@ -226,7 +226,7 @@ export default function Overview() {
             <div style={{ display: 'flex', gap: '0.75rem' }}>
               <HelpCircle size={18} style={{ color: 'var(--primary-light)', flexShrink: 0, marginTop: '0.1rem' }} />
               <div>
-                <p style={{ fontSize: '0.85rem', fontWeight: 700, color: '#fff', marginBottom: '0.35rem' }}>Hiring Command Tips</p>
+                <p style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.35rem' }}>Hiring Command Tips</p>
                 <p style={{ fontSize: '0.78rem', color: 'var(--text-body)', lineHeight: 1.5, marginBottom: '0.75rem' }}>
                   Assign weights (e.g. Technical Depth vs. Communication signals) to match your team's role requirements.
                 </p>

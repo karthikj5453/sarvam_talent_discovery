@@ -144,7 +144,7 @@ export default function Jobs() {
           <tbody>
             {jobs.map((job) => (
               <tr key={job.id}>
-                <td style={{ fontWeight: 600, color: '#fff' }}>{job.title}</td>
+                <td style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{job.title}</td>
                 <td>{job.department || 'N/A'}</td>
                 <td>
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
